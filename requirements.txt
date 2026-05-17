@@ -1,0 +1,6 @@
+pyyaml
+requests
+Pillow
+beautifulsoup4
+AO3
+ao3_api

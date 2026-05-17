@@ -1,0 +1,54 @@
+# Path to the gallery-dl config file (required).
+gdl_config: ./config.json
+
+# Root directory for all downloaded files.
+download_dir: ./download
+
+# Directory where per-artist download archives are stored.
+archives_dir: ./archives
+
+# Directory for session log files.
+log_dir: ./logs
+
+# Path to the SQLite database tracking hoard data.
+database: ./hoard.db
+
+# Sites that gallery-dl is allowed to download from.
+# These must match the key names used in artists.yaml under media categories.
+downloadable_sites:
+  - pixiv
+  - danbooru
+  - artstation
+  - twitter
+  - bluesky
+  - furaffinity
+  - tumblr
+  - deviantArt
+  - kemono
+
+# AO3 fic tracker settings
+fic_tracker:
+  # Path to your fic list file
+  fic_file: ./ao3.txt
+  # A non-finished fic with no update in this many months is marked "stale" (🟠)
+  stale_months: 6
+
+# AO3 download settings
+# These paths affect both the fic tab "Download" button (-d / --download-archive)
+# and the "Start Transfer" deduplication+copy feature.
+ao3:
+  # Where gallery-dl downloads AO3 epubs to
+  source_dir: ./AO3
+  # Where the transfer tool copies the latest version of each work
+  transfer_dir: ./AO3/.to transfer
+  # gallery-dl download archive for AO3 (tracks already-downloaded files)
+  archive: ./AO3/.archive.sqlite3
+
+# UI font settings
+# Keep emoji_family as "Segoe UI Emoji" on Windows to render colored emoji reliably.
+ui:
+  fonts:
+    ui_family: Segoe UI
+    mono_family: Consolas
+    emoji_family: Segoe UI Emoji
+    serif_family: Georgia

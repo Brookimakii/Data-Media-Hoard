@@ -1,0 +1,10 @@
+.venv/
+logs/
+cookies/
+__pycache__/
+
+download/
+AO3/
+
+.pyc
+.env
