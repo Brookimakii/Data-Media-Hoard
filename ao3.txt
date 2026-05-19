@@ -88,7 +88,7 @@
 # https://archiveofourown.org/works/81385671  # 🟢 2026-03-17 - Look to the Stars [1120] [1/1]
 # https://archiveofourown.org/works/84323356  # 🔴 2026-05-11 - Where Machines Learn to Bleed [89892] [16/?]
 # https://archiveofourown.org/works/84595111  # 🟢 2026-05-10 - A Skillful Hand [810] [1/1]
-https://archiveofourown.org/works/84557721  # 🟢 2026-05-13 - The Afflicted [15365] [3/3]
+# https://archiveofourown.org/works/84557721  # 🟢 2026-05-13 - The Afflicted [15365] [3/3]
 
 # Hollow Knight
 
@@ -311,11 +311,11 @@ https://archiveofourown.org/works/84557721  # 🟢 2026-05-13 - The Afflicted [1
 # https://archiveofourown.org/works/63756991  # 🔴 2026-04-27 - Say the Wrong Thing [8953] [8/?]
 # https://archiveofourown.org/works/82623156  # 🔴 2026-04-22 - To Love A Prince [8079] [3/5]
 # https://archiveofourown.org/works/47382331  # 🟢 2026-04-21 - Untouchable Things [73630] [24/24]
-https://archiveofourown.org/works/65230126  # 🔴 2026-05-09 - hearth [58344] [10/?]
-https://archiveofourown.org/works/12816783  # 🟢 2018-02-03 - Pretty Young Thing [52450] [5/5]
-https://archiveofourown.org/series/3117462  # 🟢 2022-10-22 - sun, sands, wind [67163] [4 works (4/4 ch.)]
-https://archiveofourown.org/series/2049069  # 🟠 2021-03-04 - Decoy [15940] [2 works (7/? ch.)]
-https://archiveofourown.org/works/6018814  # 🟠 2020-08-23 - Love Thy Enemy [60508] [13/?]
+# https://archiveofourown.org/works/65230126  # 🔴 2026-05-09 - hearth [58344] [10/?]
+# https://archiveofourown.org/works/12816783  # 🟢 2018-02-03 - Pretty Young Thing [52450] [5/5]
+# https://archiveofourown.org/series/3117462  # 🟢 2022-10-22 - sun, sands, wind [67163] [4 works (4/4 ch.)]
+# https://archiveofourown.org/series/2049069  # 🟠 2021-03-04 - Decoy [15940] [2 works (7/? ch.)]
+# https://archiveofourown.org/works/6018814  # 🟠 2020-08-23 - Love Thy Enemy [60508] [13/?]
 
 # Monster Hunter
 
