@@ -168,6 +168,7 @@ def build_fic_tracker(parent: tk.Frame) -> None:
         if any(f.url == url for f in _fic_file[0].all_fics):
             add_status_lbl.config(text="✗  Fic with this URL already exists", fg=COLOR_FAIL)
             _append_log(f"✗  Add failed — duplicate fic URL: {url}\n")
+            add_url_entry.delete(0, "end")
             return
 
         add_fetch_btn.config(state="disabled")
@@ -195,6 +196,7 @@ def build_fic_tracker(parent: tk.Frame) -> None:
                 return
 
             # Determine fandom — use existing fandoms or "Unknown"
+            add_status_lbl.config(text="Please Select a Fandom.", fg=FG_DIM)
             fandom = _pick_fandom_for_add(info)
 
             # Determine status

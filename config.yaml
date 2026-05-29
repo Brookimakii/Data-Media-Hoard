@@ -24,7 +24,7 @@ downloadable_sites:
   - furaffinity
   - tumblr
   - deviantArt
-  - kemono
+  # - kemono
 
 # AO3 fic tracker settings
 fic_tracker:

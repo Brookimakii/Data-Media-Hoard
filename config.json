@@ -115,10 +115,7 @@
       "include": "gallery",
       "layout": "auto",
       "directory": [],
-      "cookies": {
-        "a": "bb21601c-d938-40bc-ad1e-92568b4c91a3",
-        "b": "c67fc3d8-9fae-4ebd-a0c3-909756f099ef"
-      }
+      "cookies": "./cookies/www.furaffinity.net_cookies.txt"
     },
     "gelbooru": {
       "api-key": null,
@@ -175,7 +172,13 @@
       "format": "mp3"
     },
     "kemonoparty": {
-      "directory": []
+      "directory": [],
+      "postprocessors": [ {
+        "name": "metadata@post",
+        "format": "{content|''!R:J\n}\n",
+        "filename": "{username}.txt",
+        "open": "a"
+      } ]
     },
     "luscious": {
       "gif": false
