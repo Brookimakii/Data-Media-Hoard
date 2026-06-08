@@ -4,7 +4,7 @@
         {
             "label": "Media Hoard: Run",
             "type": "shell",
-            "command": "${command:python.interpreterPath}",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
             "args": ["main.py"],
             "options": { "cwd": "${workspaceFolder}" },
             "presentation": { "reveal": "always", "panel": "shared" },
