@@ -38,6 +38,7 @@ from ui.widgets import (
     divider, section_label, styled_button, styled_entry,
 )
 from ui.scroll import register_scroll_canvas
+from ui.yaml_editor import open_yaml_editor
 from ui.taskbar import (
     clear_taskbar_progress,
     set_taskbar_error,
@@ -368,7 +369,28 @@ def build_downloader(parent: tk.Frame) -> None:
 
     pause_btn = styled_button(action_row, "⏸  Pause", bg="#2a2a1a", hov="#3a3a2a")
     pause_btn.config(state="disabled")
-    pause_btn.pack(side="left")
+    pause_btn.pack(side="left", padx=(0, 10))
+    
+    def _open_editor() -> None:
+        def _on_saved(kind: str) -> None:
+            if kind == "catalogue":
+                _load_artists(cat_entry.get())
+            elif kind == "config":
+                _refresh_dl_sites()
+
+        open_yaml_editor(
+            root=parent.winfo_toplevel(),
+            catalogue_path=cat_entry.get() or DEFAULT_CATALOGUE,
+            config_path=cfg_entry.get() or DEFAULT_CONFIG,
+            on_saved=_on_saved,
+        )
+
+    edit_btn = styled_button(
+        action_row, "✎  Edit YAML",
+        bg="#1e2a3a", hov="#2a3a4a",
+        command=_open_editor
+    )
+    edit_btn.pack(side="left")
 
     # ── Queue polling ─────────────────────────────────────────────────────────
     def _append_log(text: str) -> None:

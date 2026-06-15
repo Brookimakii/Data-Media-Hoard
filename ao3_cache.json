@@ -2281,7 +2281,7 @@
   },
   "https://archiveofourown.org/works/31926598": {
     "title": "Pussycat",
-    "date": "2022-01-25",
+    "date": "2022-01-24",
     "status": "🟢",
     "chapters": "4/4",
     "word_count": "8999",
@@ -5790,5 +5790,69 @@
     "chapters": "20 works (20/20 ch.)",
     "word_count": "17059",
     "is_series": true
+  },
+  "https://archiveofourown.org/works/55827577": {
+    "title": "Flower Boy",
+    "date": "2024-05-11",
+    "status": "🟢",
+    "chapters": "1/1",
+    "word_count": "2399",
+    "is_series": false
+  },
+  "https://archiveofourown.org/works/56607514": {
+    "title": "Dubious Food",
+    "date": "2024-06-13",
+    "status": "🟢",
+    "chapters": "1/1",
+    "word_count": "1585",
+    "is_series": false
+  },
+  "https://archiveofourown.org/series/4137922": {
+    "title": "Flower Boy",
+    "date": "2024-06-13",
+    "status": "🟢",
+    "chapters": "3 works (3/3 ch.)",
+    "word_count": "5352",
+    "is_series": true
+  },
+  "https://archiveofourown.org/works/84748501": {
+    "title": "To Breathe or not to Breathe",
+    "date": "2026-06-06",
+    "status": "🟢",
+    "chapters": "7/7",
+    "word_count": "16437",
+    "is_series": false
+  },
+  "https://archiveofourown.org/series/4936177": {
+    "title": "Outcasts",
+    "date": "2026-06-06",
+    "status": "🟢",
+    "chapters": "8 works (93/93 ch.)",
+    "word_count": "251852",
+    "is_series": true
+  },
+  "https://archiveofourown.org/works/77319161": {
+    "title": "Beloved Haunting of Mine...",
+    "date": "2026-01-08",
+    "status": "🟢",
+    "chapters": "7/7",
+    "word_count": "59850",
+    "is_series": false
+  },
+  "https://archiveofourown.org/works/84452716": {
+    "title": "Greener Pastures",
+    "date": "2026-05-18",
+    "status": "🟢",
+    "chapters": "14/14",
+    "word_count": "19312",
+    "is_series": false
+  },
+  "https://archiveofourown.org/works/74250406": {
+    "title": "Rauru's Cheeky Dance",
+    "date": "2025-11-15",
+    "status": "🟢",
+    "chapters": "1/1",
+    "word_count": "2788",
+    "is_series": false
   }
 }
