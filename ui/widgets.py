@@ -147,6 +147,7 @@ class Tooltip:
         tk.Label(
             tw, text=text, bg="#1a1a28", fg=FG,
             font=FONT_MONO, justify="left", padx=10, pady=6,
+            wraplength=420,
         ).pack()
 
     def _hide(self, _e: tk.Event | None = None) -> None:

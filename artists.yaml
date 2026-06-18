@@ -1,4 +1,49 @@
 artists:
+- name: aaassstaro
+  enabled: true
+  tags:
+  - FurryArt
+  - Kemono
+  - Anthro
+  - DigitalPainting
+  - MaleFurry
+  - MuscularFurry
+  - BigPecs
+  - BaraFurry
+  - HairyFurry
+  - BeefyFurry
+  - JapaneseFurryArtist
+  - GayFurry
+  - Yaoi
+  - R18
+  - FurryNSFW
+  - TopFixed
+  - DominantTop
+  - MuscledMale
+  - BigChestEmphasis
+  - PowerFantasy
+  - ExpressiveFaces
+  - VibrantColors
+  - CleanLineart
+  - DetailedFur
+  - MonsterFurry
+  - HeroicVillainVibes
+  - PokeFurry
+  - CasualNSFW
+  - CommissionArtist
+  notes: Japanese 🔞 furry/kemono artist specializing in muscular, beefy male anthros
+    with big pecs and dominant top energy. Creates vibrant, clean digital illustrations
+    and R18 commissions featuring bara-style gay furry scenes, often with heroic yet
+    villainous-looking characters and heavy chest emphasis.
+  media:
+    paid:
+      booth: https://aaassstaro.booth.pm/
+      fanbox: https://aaassstaro.fanbox.cc/
+    socials:
+      kemono: https://kemono.cr/fanbox/user/11212326
+      pixiv: https://www.pixiv.net/en/users/11212326
+      skeb: https://skeb.jp/@aaassstaro
+      twitter: https://x.com/aaassstaro
 - name: Agitype01
   enabled: true
   tags:
@@ -57,6 +102,150 @@ artists:
       twitter:
       - https://x.com/agitype01
       - https://twitter.com/agitizing
+- name: K_Bloodstein
+  enabled: true
+  tags:
+  - FurryArt
+  - Anthro
+  - MonsterFurry
+  - HybridFurry
+  - DigitalPainting
+  - DramaticLighting
+  - MuscularFurry
+  - ChubbyFurry
+  - IntimidatingCharacters
+  - DarkFantasyFurry
+  - VibrantColors
+  - MoodyAtmosphere
+  - ExpressiveEyes
+  - DetailedFur
+  - UnholyBatWolf
+  - PriestFurry
+  - SharkFurry
+  - BirdFurry
+  - Adoptables
+  - FurryNSFW
+  - GayFurry
+  - MuscledMaleFurry
+  - DominantAesthetic
+  - IntimidatingGaze
+  - CasualNSFW
+  - PowerFantasy
+  - SpanishFurryArtist
+  - LatinFurryArtist
+  notes: Spanish-speaking furry artist known for high-impact digital illustrations
+    of muscular, intimidating anthro and monster characters with dramatic lighting
+    and moody atmospheres. Features recurring OCs like the unholy bat-wolf and shark-like
+    figures, blending dark fantasy vibes with adoptables and plushie promotions. Includes
+    casual NSFW content focused on powerful male furries.
+  media:
+    aggregators:
+      carrd: https://bloodsteincommissions.carrd.co/
+      e621: https://e621.net/posts?tags=klaus_bloodstein
+      toyhou.se: https://toyhou.se/BloodsteinKlaus
+    paid:
+      kofi: https://ko-fi.com/klausbloodstein
+      patreon: https://www.patreon.com/PatKlausBloodstein
+    socials:
+      facebook: https://www.facebook.com/KBloodstein
+      instagram: https://www.instagram.com/klaus_bloodstein
+      kemono: https://kemono.cr/patreon/user/81070127
+      twitter: https://x.com/K_Bloodstein
+- name: LluisAbadias
+  enabled: true
+  tags:
+  - FurryArt
+  - Anthro
+  - MonsterGirl
+  - MonsterBoy
+  - SizeDifference
+  - HMOFA
+  - MonsterFucking
+  - Giantess
+  - MacroMicro
+  - DramaticLighting
+  - DigitalPainting
+  - MuscularMonsters
+  - ThiccMonsterWomen
+  - KnightMonster
+  - FantasyArt
+  - DarkFantasy
+  - CheesyRomance
+  - LewdPuns
+  - ExpressiveFaces
+  - DetailedAnatomy
+  - VibrantColors
+  - MoodyAtmosphere
+  - SpanishArtist
+  - MonsterArt
+  - FurryNSFW
+  - GayFurry
+  - HeteroMonster
+  - PowerImbalance
+  - DevotionKink
+  - AffectionateDomination
+  - CasualNSFW
+  - SizeKink
+  notes: Spanish artist specializing in high-impact digital monster and anthro illustrations
+    with dramatic lighting and bold size difference. Creates viral lewd scenes of
+    tiny humans/knights in romantic or explicit encounters with massive monster women
+    and creatures, blending cheesy romance, puns, and intense power dynamics.
+  media:
+    aggregators:
+      e621: https://e621.net/posts?tags=lluisabadias
+    paid:
+      patreon: https://www.patreon.com/laserlluis
+    socials:
+      furaffinity: https://www.furaffinity.net/user/laserlluis
+      kemono: https://kemono.su/patreon/user/19367984
+      twitter: https://x.com/LluisAbadias
+- name: LluisAbadias
+  enabled: true
+  tags:
+  - FurryArt
+  - Anthro
+  - MonsterGirl
+  - MonsterBoy
+  - SizeDifference
+  - HMOFA
+  - MonsterFucking
+  - Giantess
+  - MacroMicro
+  - DramaticLighting
+  - DigitalPainting
+  - MuscularMonsters
+  - ThiccMonsterWomen
+  - KnightMonster
+  - FantasyArt
+  - DarkFantasy
+  - CheesyRomance
+  - LewdPuns
+  - ExpressiveFaces
+  - DetailedAnatomy
+  - VibrantColors
+  - MoodyAtmosphere
+  - SpanishArtist
+  - MonsterArt
+  - FurryNSFW
+  - HeteroMonster
+  - PowerImbalance
+  - DevotionKink
+  - AffectionateDomination
+  - CasualNSFW
+  - SizeKink
+  notes: Spanish artist specializing in high-impact digital monster and anthro illustrations
+    with dramatic lighting and bold size difference. Creates viral lewd scenes of
+    tiny humans/knights in romantic or explicit encounters with massive monster women
+    and creatures, blending cheesy romance, puns, and intense power dynamics. (39
+    words)
+  media:
+    paid:
+      patreon: patreon.com/laserlluis
+      throne: throne.com/laserlluis
+    socials:
+      discord: discord.gg/Hk2qbkZ7Gs
+      kemono: https://kemono.cr/patreon/user/19367984
+      twitter: https://x.com/LluisAbadias
 - name: Oro97
   enabled: true
   tags:
@@ -153,145 +342,3 @@ artists:
       twitter:
       - https://x.com/crocsleeve
       - https://x.com/_Plive/
-- name: K_Bloodstein
-  enabled: true
-  tags:
-  - FurryArt
-  - Anthro
-  - MonsterFurry
-  - HybridFurry
-  - DigitalPainting
-  - DramaticLighting
-  - MuscularFurry
-  - ChubbyFurry
-  - IntimidatingCharacters
-  - DarkFantasyFurry
-  - VibrantColors
-  - MoodyAtmosphere
-  - ExpressiveEyes
-  - DetailedFur
-  - UnholyBatWolf
-  - PriestFurry
-  - SharkFurry
-  - BirdFurry
-  - Adoptables
-  - FurryNSFW
-  - GayFurry
-  - MuscledMaleFurry
-  - DominantAesthetic
-  - IntimidatingGaze
-  - CasualNSFW
-  - PowerFantasy
-  - SpanishFurryArtist
-  - LatinFurryArtist
-  notes: Spanish-speaking furry artist known for high-impact digital illustrations
-    of muscular, intimidating anthro and monster characters with dramatic lighting
-    and moody atmospheres. Features recurring OCs like the unholy bat-wolf and shark-like
-    figures, blending dark fantasy vibes with adoptables and plushie promotions. Includes
-    casual NSFW content focused on powerful male furries.
-  media:
-    aggregators:
-      carrd: https://bloodsteincommissions.carrd.co/
-      e621: https://e621.net/posts?tags=klaus_bloodstein
-      toyhou.se: https://toyhou.se/BloodsteinKlaus
-    paid:
-      kofi: https://ko-fi.com/klausbloodstein
-      patreon: https://www.patreon.com/PatKlausBloodstein
-    socials:
-      facebook: https://www.facebook.com/KBloodstein
-      instagram: https://www.instagram.com/klaus_bloodstein
-      kemono: https://kemono.cr/patreon/user/81070127
-      twitter: https://x.com/K_Bloodstein
-- name: aaassstaro
-  enabled: true
-  tags:
-  - FurryArt
-  - Kemono
-  - Anthro
-  - DigitalPainting
-  - MaleFurry
-  - MuscularFurry
-  - BigPecs
-  - BaraFurry
-  - HairyFurry
-  - BeefyFurry
-  - JapaneseFurryArtist
-  - GayFurry
-  - Yaoi
-  - R18
-  - FurryNSFW
-  - TopFixed
-  - DominantTop
-  - MuscledMale
-  - BigChestEmphasis
-  - PowerFantasy
-  - ExpressiveFaces
-  - VibrantColors
-  - CleanLineart
-  - DetailedFur
-  - MonsterFurry
-  - HeroicVillainVibes
-  - PokeFurry
-  - CasualNSFW
-  - CommissionArtist
-  notes: Japanese 🔞 furry/kemono artist specializing in muscular, beefy male anthros
-    with big pecs and dominant top energy. Creates vibrant, clean digital illustrations
-    and R18 commissions featuring bara-style gay furry scenes, often with heroic yet
-    villainous-looking characters and heavy chest emphasis.
-  media:
-    paid:
-      booth: https://aaassstaro.booth.pm/
-      fanbox: https://aaassstaro.fanbox.cc/
-    socials:
-      kemono: https://kemono.cr/fanbox/user/11212326
-      pixiv: https://www.pixiv.net/en/users/11212326
-      skeb: https://skeb.jp/@aaassstaro
-      twitter: https://x.com/aaassstaro
-- name: LluisAbadias
-  enabled: true
-  tags:
-  - FurryArt
-  - Anthro
-  - MonsterGirl
-  - MonsterBoy
-  - SizeDifference
-  - HMOFA
-  - MonsterFucking
-  - Giantess
-  - MacroMicro
-  - DramaticLighting
-  - DigitalPainting
-  - MuscularMonsters
-  - ThiccMonsterWomen
-  - KnightMonster
-  - FantasyArt
-  - DarkFantasy
-  - CheesyRomance
-  - LewdPuns
-  - ExpressiveFaces
-  - DetailedAnatomy
-  - VibrantColors
-  - MoodyAtmosphere
-  - SpanishArtist
-  - MonsterArt
-  - FurryNSFW
-  - GayFurry
-  - HeteroMonster
-  - PowerImbalance
-  - DevotionKink
-  - AffectionateDomination
-  - CasualNSFW
-  - SizeKink
-  notes: Spanish artist specializing in high-impact digital monster and anthro illustrations
-    with dramatic lighting and bold size difference. Creates viral lewd scenes of
-    tiny humans/knights in romantic or explicit encounters with massive monster women
-    and creatures, blending cheesy romance, puns, and intense power dynamics.
-  media:
-    aggregators:
-      e621: https://e621.net/posts?tags=lluisabadias
-    paid:
-      patreon: https://www.patreon.com/laserlluis
-    socials:
-      furaffinity: https://www.furaffinity.net/user/laserlluis
-      kemono: https://kemono.su/patreon/user/19367984
-      twitter: https://x.com/LluisAbadias

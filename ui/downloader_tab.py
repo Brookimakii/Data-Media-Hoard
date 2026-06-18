@@ -370,7 +370,7 @@ def build_downloader(parent: tk.Frame) -> None:
     pause_btn = styled_button(action_row, "⏸  Pause", bg="#2a2a1a", hov="#3a3a2a")
     pause_btn.config(state="disabled")
     pause_btn.pack(side="left", padx=(0, 10))
-    
+
     def _open_editor() -> None:
         def _on_saved(kind: str) -> None:
             if kind == "catalogue":
@@ -385,11 +385,9 @@ def build_downloader(parent: tk.Frame) -> None:
             on_saved=_on_saved,
         )
 
-    edit_btn = styled_button(
-        action_row, "✎  Edit YAML",
-        bg="#1e2a3a", hov="#2a3a4a",
-        command=_open_editor
-    )
+    edit_btn = styled_button(action_row, "✎  Edit YAML",
+                             bg="#1e2a3a", hov="#2a3a4a",
+                             command=_open_editor)
     edit_btn.pack(side="left")
 
     # ── Queue polling ─────────────────────────────────────────────────────────

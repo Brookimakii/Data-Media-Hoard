@@ -14,12 +14,13 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+
+from ui.downloader_tab import build_downloader
 from ui.theme import (
     ACCENT, BG, BORDER, ENTRY_BG, FG, FG_DIM,
     FONT_BOLD, FONT_HEAD, FONT_MONO, FONT_SUB, PANEL,
 )
 from ui.scroll import bind_global_scroll
-from ui.downloader_tab import build_downloader
 from ui.uploader_tab import build_uploader
 from ui.fic_tab import build_fic_tracker
 from ui.taskbar import init_taskbar

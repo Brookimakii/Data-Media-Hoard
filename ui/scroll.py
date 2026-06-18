@@ -20,6 +20,22 @@ Usage
 import tkinter as tk
 
 _canvases: list[tk.Canvas] = []
+_suspended = False
+
+
+def suspend_global_scroll(suspended: bool = True) -> None:
+    """
+    Pause (or resume) the global scroll router entirely.
+
+    Call suspend_global_scroll(True) when a modal Toplevel (e.g. the YAML
+    editor) opens on top of the main window, and suspend_global_scroll(False)
+    when it closes. While suspended, _global_scroll is a no-op, so wheel
+    events over the main window can't scroll anything underneath the modal —
+    geometric "is the pointer over a registered canvas" checks have no idea
+    a dialog is stacked on top, so this is the only reliable way to stop it.
+    """
+    global _suspended
+    _suspended = suspended
 
 
 def register_scroll_canvas(canvas: tk.Canvas) -> None:
@@ -65,6 +81,8 @@ def _canvas_under_pointer(event: tk.Event) -> tk.Canvas | None:
 
 
 def _global_scroll(event: tk.Event) -> None:
+    if _suspended:
+        return
     # Let Text widgets handle their own scrolling
     if isinstance(event.widget, tk.Text):
         return

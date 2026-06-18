@@ -30,6 +30,7 @@ from ui.theme import (
     COLOR_FAIL, COLOR_OK, COLOR_RUNNING, ROW_ALT,
 )
 from ui.widgets import divider, section_label, styled_button, styled_entry
+from ui.scroll import suspend_global_scroll
 from utils.yaml_io import read_yaml, write_yaml, YAMLError
 
 # ── constants ──────────────────────────────────────────────────────────────────
@@ -76,8 +77,11 @@ def _lbl(parent: tk.Widget, text: str, fg: str = FG_DIM,
                     font=font or FONT_MONO, **kw)
 
 
-def _scrolled_frame(parent: tk.Widget) -> tuple[tk.Canvas, tk.Frame]:
-    """Return (canvas, inner_frame); caller packs canvas."""
+def _scrolled_frame(
+    parent: tk.Widget,
+    lock: "_ScrollLock | None" = None,
+) -> tuple[tk.Canvas, tk.Frame, ttk.Scrollbar]:
+    """Return (canvas, inner_frame, scrollbar); caller packs canvas."""
     canvas = tk.Canvas(parent, bg=ENTRY_BG, highlightthickness=0)
     sb = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
     inner = tk.Frame(canvas, bg=ENTRY_BG)
@@ -92,20 +96,59 @@ def _scrolled_frame(parent: tk.Widget) -> tuple[tk.Canvas, tk.Frame]:
     sb.pack(side="right", fill="y")
     canvas.pack(side="left", fill="both", expand=True)
 
-    def _scroll(ev: tk.Event) -> None:
-        if ev.num == 4:
-            canvas.yview_scroll(-1, "units")
-        elif ev.num == 5:
-            canvas.yview_scroll(1, "units")
-        else:
-            canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units")
-
+    handler = _make_scroll_handler(canvas, lock)
     for w in (canvas, inner):
-        w.bind("<MouseWheel>", _scroll)
-        w.bind("<Button-4>",   _scroll)
-        w.bind("<Button-5>",   _scroll)
+        w.bind("<MouseWheel>", handler)
+        w.bind("<Button-4>",   handler)
+        w.bind("<Button-5>",   handler)
 
-    return canvas, inner
+    return canvas, inner, sb
+
+
+class _ScrollLock:
+    """
+    Single global switch for the YAML editor window.
+
+    While locked, every wheel handler created via _make_scroll_handler()
+    swallows the event (returns "break") instead of scrolling — this is
+    simpler and far more reliable than guarding each binding site
+    individually, since it only needs to be flipped in exactly two places
+    (card expand / collapse) and every handler automatically respects it.
+    """
+    def __init__(self) -> None:
+        self.locked = False
+
+
+def _make_scroll_handler(
+    canvas: tk.Canvas,
+    lock: "_ScrollLock | None" = None,
+) -> Callable[[tk.Event], str]:
+    """
+    Build a wheel-event handler bound to *canvas* that:
+      - does nothing while *lock* is held (lock.locked is True)
+      - otherwise scrolls only when content actually overflows the
+        visible area
+      - always returns "break" so the event never falls through to
+        whatever canvas/dialog happens to be underneath
+    """
+    def _overflows() -> bool:
+        bbox = canvas.bbox("all")
+        if not bbox:
+            return False
+        return (bbox[3] - bbox[1]) > canvas.winfo_height()
+
+    def _handler(ev: tk.Event) -> str:
+        if lock is not None and lock.locked:
+            return "break"
+        if _overflows():
+            if ev.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif ev.num == 5:
+                canvas.yview_scroll(1, "units")
+            else:
+                canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units")
+        return "break"
+    return _handler
 
 
 def _sort_media(media: dict) -> dict:
@@ -133,12 +176,18 @@ class _ArtistCard(tk.Frame):
     """
 
     def __init__(self, parent: tk.Widget, artist: dict,
-                 on_move_up: Callable, on_move_down: Callable, **kw) -> None:
+                 on_move_up: Callable, on_move_down: Callable,
+                 canvas: tk.Canvas, outer_sb: ttk.Scrollbar,
+                 lock: "_ScrollLock", **kw) -> None:
         super().__init__(parent, bg=BORDER, padx=1, pady=1, **kw)
-        self._artist   = dict(artist)
+        self._artist       = dict(artist)
         self._on_move_up   = on_move_up
         self._on_move_down = on_move_down
-        self._expanded = False
+        self._canvas       = canvas
+        self._outer_sb     = outer_sb
+        self._lock         = lock
+        self._expanded     = False
+        self._resize_bind_id: str | None = None
         self._link_rows: list[dict] = []
         self._build()
 
@@ -148,9 +197,9 @@ class _ArtistCard(tk.Frame):
         self._inner = tk.Frame(self, bg=ENTRY_BG)
         self._inner.pack(fill="both", expand=True)
         self._build_header()
-        self._body = tk.Frame(self._inner, bg=ENTRY_BG)
-        self._build_body()
-        # Start collapsed; apply enabled state
+        # _body_canvas / _body_inner created fresh on each expand
+        self._body_canvas: tk.Canvas | None = None
+        self._body_inner:  tk.Frame  | None = None
         self._apply_enabled()
 
     def _build_header(self) -> None:
@@ -198,8 +247,8 @@ class _ArtistCard(tk.Frame):
         for w in (hdr, self._arrow, self._name_lbl):
             w.bind("<Button-1>", lambda _: self._toggle_expand())
 
-    def _build_body(self) -> None:
-        body = self._body
+    def _build_body(self, body: tk.Frame) -> None:
+        """Populate *body* (the inner scrollable frame) with form fields."""
 
         # ── Name field (editable) ──────────────────────────────────────────
         name_row = tk.Frame(body, bg=ENTRY_BG)
@@ -296,6 +345,38 @@ class _ArtistCard(tk.Frame):
              padx=5, pady=1).pack(side="left")
         self._link_rows.append(rd)
 
+    # ── scroll helpers ─────────────────────────────────────────────────────
+
+    def _bind_scroll_tree(self, widget: tk.Widget, target: tk.Canvas,
+                           respect_lock: bool = True) -> None:
+        """
+        Recursively forward scroll events from *widget* tree to *target* canvas.
+
+        respect_lock=True  → forwarding goes inert while the shared lock is
+                              held (used for the collapsed header, which must
+                              not move the outer list while another card —
+                              or this same card — is open for editing).
+        respect_lock=False → always forwards regardless of lock state (used
+                              for the body of *this* card while it's open,
+                              since that's the one place scrolling must keep
+                              working even though everything else is locked).
+        """
+        handler = _make_scroll_handler(target, self._lock if respect_lock else None)
+        widget.bind("<MouseWheel>", handler, add=True)
+        widget.bind("<Button-4>",   handler, add=True)
+        widget.bind("<Button-5>",   handler, add=True)
+        for child in widget.winfo_children():
+            self._bind_scroll_tree(child, target, respect_lock)
+
+    def _lock_outer(self) -> None:
+        """Flip the shared lock so every scroll handler in the editor goes inert."""
+        self._lock.locked = True
+        self._outer_sb.state(["disabled"])   # also blocks dragging the scrollbar thumb
+
+    def _unlock_outer(self) -> None:
+        self._lock.locked = False
+        self._outer_sb.state(["!disabled"])
+
     # ── expand / collapse ──────────────────────────────────────────────────
 
     def _toggle_expand(self) -> None:
@@ -305,16 +386,121 @@ class _ArtistCard(tk.Frame):
             self.expand()
 
     def expand(self) -> None:
-        if not self._expanded:
-            self._body.pack(fill="x", after=self._hdr)
-            self._arrow.config(text="▼")
-            self._expanded = True
+        if self._expanded:
+            return
+        self._expanded = True
+        self._arrow.config(text="▼")
+        self._lock_outer()
+
+        # ── Measure available height in the outer canvas viewport ──────────
+        self._canvas.update_idletasks()
+        viewport_h = self._canvas.winfo_height()
+        hdr_h      = self._hdr.winfo_reqheight() + 8   # header + padding
+
+        # Card fills the viewport: header stays visible, body takes the rest
+        body_h = max(viewport_h - hdr_h, 200)
+
+        # ── Build inner scroll canvas for the body ─────────────────────────
+        body_canvas = tk.Canvas(self._inner, bg=ENTRY_BG,
+                                highlightthickness=0, height=body_h)
+        body_sb     = ttk.Scrollbar(self._inner, orient="vertical",
+                                    command=body_canvas.yview)
+        body_inner  = tk.Frame(body_canvas, bg=ENTRY_BG)
+        win_id = body_canvas.create_window((0, 0), window=body_inner, anchor="nw")
+
+        body_inner.bind(
+            "<Configure>",
+            lambda _: body_canvas.configure(
+                scrollregion=body_canvas.bbox("all")))
+        body_canvas.bind(
+            "<Configure>",
+            lambda e: body_canvas.itemconfig(win_id, width=e.width))
+        body_canvas.configure(yscrollcommand=body_sb.set)
+
+        # Pack scrollbar first so it sits on the right
+        body_sb.pack(side="right", fill="y", after=self._hdr)
+        body_canvas.pack(side="left", fill="both", expand=True, after=self._hdr)
+
+        self._body_canvas = body_canvas
+        self._body_inner  = body_inner
+
+        # Populate form fields into body_inner
+        self._link_rows.clear()
+        self._build_body(body_inner)
+
+        # Route all wheel events inside the card to the body canvas.
+        # respect_lock=False: this body is the one place that must keep
+        # scrolling even though the outer list and other headers are locked.
+        self._bind_scroll_tree(body_inner, body_canvas, respect_lock=False)
+
+        # Also handle wheel on the body canvas itself (never locked either)
+        body_handler = _make_scroll_handler(body_canvas, lock=None)
+        body_canvas.bind("<MouseWheel>", body_handler)
+        body_canvas.bind("<Button-4>",   body_handler)
+        body_canvas.bind("<Button-5>",   body_handler)
+
+        # ── Keep body height pinned to "fill remaining viewport" on resize,
+        #    and keep this card's header anchored at the top so the edited
+        #    card never visibly drifts while the window is being resized ──
+        def _resync(_e: tk.Event | None = None) -> None:
+            if self._body_canvas is None or not self._body_canvas.winfo_exists():
+                return
+            self._canvas.update_idletasks()
+            new_viewport_h = self._canvas.winfo_height()
+            new_hdr_h      = self._hdr.winfo_reqheight() + 8
+            new_body_h     = max(new_viewport_h - new_hdr_h, 200)
+            self._body_canvas.configure(height=new_body_h)
+            self._anchor_to_top()
+
+        # Outer canvas resizes whenever the editor window/pane is resized
+        self._resize_bind_id = self._canvas.bind("<Configure>", _resync, add=True)
+        # Run once immediately in case sizes changed since the initial measure
+        self._canvas.after(10, _resync)
+
+        self._anchor_to_top()
+
+    def _anchor_to_top(self) -> None:
+        """Scroll the outer canvas so this card's header sits at the top of the viewport."""
+        self._canvas.update_idletasks()
+        card_y = self.winfo_y()
+        total  = self._canvas.bbox("all")
+        if total and total[3] > 0:
+            self._canvas.yview_moveto(card_y / total[3])
+
+    def _sync_artist(self) -> None:
+        """Flush the live form values back into self._artist before destroying widgets."""
+        if not self._expanded or self._body_inner is None:
+            return
+        self._artist = self.get_data()
+        # Keep name_var in sync with whatever was typed
+        self._name_var.set(self._artist.get("name", ""))
 
     def collapse(self) -> None:
-        if self._expanded:
-            self._body.pack_forget()
-            self._arrow.config(text="▶")
-            self._expanded = False
+        if not self._expanded:
+            return
+        # Save edits before destroying form widgets
+        self._sync_artist()
+        self._expanded = False
+        self._arrow.config(text="▶")
+
+        # Stop tracking outer canvas resizes for this card
+        if self._resize_bind_id is not None:
+            try:
+                self._canvas.unbind("<Configure>", self._resize_bind_id)
+            except tk.TclError:
+                pass
+            self._resize_bind_id = None
+
+        # Destroy the inner scroll canvas + its scrollbar
+        if self._body_canvas is not None:
+            for child in list(self._inner.winfo_children()):
+                if child is not self._hdr:
+                    child.destroy()
+            self._body_canvas = None
+            self._body_inner  = None
+            self._link_rows.clear()
+
+        self._unlock_outer()
 
     # ── enable / disable ───────────────────────────────────────────────────
 
@@ -357,6 +543,17 @@ class _ArtistCard(tk.Frame):
     # ── serialise ──────────────────────────────────────────────────────────
 
     def get_data(self) -> dict:
+        """
+        Serialise card to dict.
+        When collapsed the form widgets don't exist; fall back to self._artist
+        (which is kept in sync on collapse via _sync_artist).
+        """
+        if not self._expanded:
+            # Return the cached data unchanged (enabled state always live)
+            entry = dict(self._artist)
+            entry["enabled"] = self._enabled_var.get()
+            return entry
+
         name  = self._name_entry.get().strip()
         notes = self._notes_text.get("1.0", "end").strip()
         tags  = [t.strip() for t in self._tags_entry.get().split(",") if t.strip()]
@@ -401,6 +598,7 @@ class ArtistEditor(tk.Frame):
         super().__init__(parent, bg=ENTRY_BG, **kw)
         self._path: Path | None = None
         self._cards: list[_ArtistCard] = []
+        self._lock = _ScrollLock()    # shared by every card's header + outer canvas
         self._search_query = tk.StringVar()
         self._search_query.trace_add("write", lambda *_: self._apply_filter())
         self._build()
@@ -445,7 +643,7 @@ class ArtistEditor(tk.Frame):
         # ── Scrollable card list ────────────────────────────────────────────
         scroll_outer = tk.Frame(self, bg=ENTRY_BG)
         scroll_outer.pack(fill="both", expand=True)
-        self._canvas, self._inner = _scrolled_frame(scroll_outer)
+        self._canvas, self._inner, self._sb = _scrolled_frame(scroll_outer, self._lock)
 
     # ── data ───────────────────────────────────────────────────────────────
 
@@ -484,8 +682,17 @@ class ArtistEditor(tk.Frame):
             self._swap(i, i + 1)
 
         card = _ArtistCard(self._inner, artist,
-                           on_move_up=_up, on_move_down=_down)
+                           on_move_up=_up, on_move_down=_down,
+                           canvas=self._canvas, outer_sb=self._sb,
+                           lock=self._lock)
         card.pack(fill="x", padx=8, pady=3)
+        # Forward scroll from the card's header only (visible while collapsed)
+        # to the outer canvas. respect_lock=True (default) means this goes
+        # inert the instant ANY card is expanded — including this one —
+        # because all cards share the same _ScrollLock instance.
+        # The body — built fresh on each expand() — is wired separately with
+        # respect_lock=False and must never share this binding.
+        card._bind_scroll_tree(card._hdr, self._canvas)
         self._cards.append(card)
         return card
 
@@ -645,7 +852,7 @@ class ConfigEditor(tk.Frame):
         self._status_lbl.pack(side="left", padx=12, pady=6)
         outer = tk.Frame(self, bg=ENTRY_BG)
         outer.pack(fill="both", expand=True)
-        _, self._inner = _scrolled_frame(outer)
+        _, self._inner, _ = _scrolled_frame(outer)
         self._form = tk.Frame(self._inner, bg=ENTRY_BG)
         self._form.pack(fill="x", padx=16, pady=8)
 
@@ -797,14 +1004,29 @@ def open_yaml_editor(
     win.geometry(f"{_WIN_W}x{_WIN_H}")
     win.configure(bg=BG)
     win.minsize(760, 540)
+    win.transient(root)     # stay on top of / tied to the main window
+    win.grab_set()          # makes click/keyboard modal
     _OPEN_WINDOW = win
+
+    # The main window routes ALL wheel events through a single app-wide
+    # bind_all handler (ui.scroll._global_scroll) that picks whichever
+    # registered canvas is geometrically under the pointer — it has no idea
+    # this modal dialog is stacked on top. Suspending it for the duration
+    # this editor is open is what actually stops the window underneath from
+    # scrolling; grab_set() alone does not cover <MouseWheel>.
+    suspend_global_scroll(True)
 
     def _on_close() -> None:
         global _OPEN_WINDOW
+        win.grab_release()
+        suspend_global_scroll(False)
         _OPEN_WINDOW = None
         win.destroy()
 
     win.protocol("WM_DELETE_WINDOW", _on_close)
+    # Safety net: if the window is destroyed through any other path (not via
+    # _on_close), make sure the main window's scroll never stays frozen.
+    win.bind("<Destroy>", lambda _e: suspend_global_scroll(False), add=True)
 
     # Title bar
     hdr = tk.Frame(win, bg=BG, pady=10)
