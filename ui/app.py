@@ -14,15 +14,16 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-
-from ui.downloader_tab import build_downloader
 from ui.theme import (
     ACCENT, BG, BORDER, ENTRY_BG, FG, FG_DIM,
     FONT_BOLD, FONT_HEAD, FONT_MONO, FONT_SUB, PANEL,
 )
 from ui.scroll import bind_global_scroll
+from ui.downloader_tab import build_downloader
 from ui.uploader_tab import build_uploader
 from ui.fic_tab import build_fic_tracker
+from ui.tag_media_tab import build_tag_media
+from ui.duplicates_tab import build_duplicates
 from ui.taskbar import init_taskbar
 
 
@@ -94,16 +95,22 @@ def create_app() -> tk.Tk:
     nb = ttk.Notebook(root)
     nb.pack(fill="both", expand=True)
 
-    tab_dl  = tk.Frame(nb, bg=PANEL)
-    tab_up  = tk.Frame(nb, bg=PANEL)
-    tab_fic = tk.Frame(nb, bg=PANEL)
-    nb.add(tab_dl,  text="  ↓  Downloader  ")
-    nb.add(tab_up,  text="  ↑  Uploader  ")
-    nb.add(tab_fic, text="  📖  Fic Tracker  ")
+    tab_dl   = tk.Frame(nb, bg=PANEL)
+    tab_up   = tk.Frame(nb, bg=PANEL)
+    tab_fic  = tk.Frame(nb, bg=PANEL)
+    tab_tag  = tk.Frame(nb, bg=PANEL)
+    tab_dupe = tk.Frame(nb, bg=PANEL)
+    nb.add(tab_dl,   text="  ↓  Downloader  ")
+    nb.add(tab_up,   text="  ↑  Uploader  ")
+    nb.add(tab_fic,  text="  📖  Fic Tracker  ")
+    nb.add(tab_tag,  text="  🏷  Tag Media  ")
+    nb.add(tab_dupe, text="  🔍  Duplicates  ")
 
     build_downloader(tab_dl)
     build_uploader(tab_up)
     build_fic_tracker(tab_fic)
+    build_tag_media(tab_tag)
+    build_duplicates(tab_dupe)
 
     bind_global_scroll(root)
 

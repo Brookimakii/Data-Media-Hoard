@@ -9,9 +9,12 @@ returns a result dict. Callers decide how to surface errors.
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 # ── Result type ────────────────────────────────────────────────────────────────
@@ -70,6 +73,7 @@ def upload_image(
     try:
         import requests
     except ImportError:
+        log.error("upload_image: 'requests' is not installed")
         return UploadResult(
             success=False,
             message="'requests' is not installed. Run: pip install requests",
@@ -91,6 +95,11 @@ def upload_image(
     mime, _ = mimetypes.guess_type(str(image_path))
     mime = mime or "application/octet-stream"
 
+    log.debug(
+        "upload_image: POST %s file=%s user=%s rating=%s tags=%d source=%s",
+        endpoint, image_path.name, username, rating, len(tags), source or "-",
+    )
+
     try:
         with image_path.open("rb") as img_file:
             files = {"upload[file]": (image_path.name, img_file, mime)}
@@ -105,6 +114,7 @@ def upload_image(
         if response.status_code in (200, 201):
             data    = response.json()
             post_id = data.get("post_id") or data.get("id")
+            log.debug("upload_image: success, post #%s (%s)", post_id, image_path.name)
             return UploadResult(
                 success=True,
                 post_id=post_id,
@@ -122,6 +132,10 @@ def upload_image(
         except Exception:
             reason = response.text
 
+        log.warning(
+            "upload_image: HTTP %s for %s: %s",
+            response.status_code, image_path.name, reason,
+        )
         return UploadResult(
             success=False,
             message=f"HTTP {response.status_code}: {reason}",
@@ -129,12 +143,16 @@ def upload_image(
         )
 
     except requests.exceptions.ConnectionError as e:
+        log.warning("upload_image: connection error for %s: %s", image_path.name, e)
         return UploadResult(success=False, message=f"Connection error: {e}")
     except requests.exceptions.Timeout:
+        log.warning("upload_image: timed out for %s", image_path.name)
         return UploadResult(success=False, message="Request timed out.")
     except OSError as e:
+        log.warning("upload_image: file error for %s: %s", image_path.name, e)
         return UploadResult(success=False, message=f"File error: {e}")
     except Exception as e:
+        log.error("upload_image: unexpected error for %s: %s", image_path.name, e)
         return UploadResult(success=False, message=f"Unexpected error: {e}")
 
 

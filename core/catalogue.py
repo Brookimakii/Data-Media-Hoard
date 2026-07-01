@@ -12,10 +12,13 @@ how to surface them to the user.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from utils.yaml_io import read_yaml, YAMLError
+
+log = logging.getLogger(__name__)
 
 
 # ── Typed exceptions ───────────────────────────────────────────────────────────
@@ -51,12 +54,15 @@ def load_artists(path: str | Path) -> list[dict[str, Any]]:
     Raises CatalogueError on missing file, parse failure, or wrong structure.
     """
     path = Path(path)
+    log.debug("Loading artist catalogue from %s", path)
     try:
         data = read_yaml(path)
     except YAMLError as e:
+        log.error("Failed to read catalogue %s: %s", path, e)
         raise CatalogueError(str(e)) from e
 
     if data is None:
+        log.debug("Catalogue %s is empty — returning 0 artists", path)
         return []
 
     if not isinstance(data, dict):
@@ -84,6 +90,7 @@ def load_artists(path: str | Path) -> list[dict[str, Any]]:
             )
         validated.append(entry)
 
+    log.debug("Loaded %d artist(s) from %s", len(validated), path)
     return validated
 
 
@@ -133,9 +140,11 @@ def load_config(path: str | Path) -> dict[str, Any]:
     Raises ConfigError on missing file, parse failure, or wrong structure.
     """
     path = Path(path)
+    log.debug("Loading config from %s", path)
     try:
         data = read_yaml(path)
     except YAMLError as e:
+        log.error("Failed to read config %s: %s", path, e)
         raise ConfigError(str(e)) from e
 
     if data is None:
@@ -167,6 +176,11 @@ def load_config(path: str | Path) -> dict[str, Any]:
         )
     config["downloadable_sites"] = set(raw_sites)
 
+    log.debug(
+        "Config loaded: download_dir=%s database=%s downloadable_sites=%s",
+        config.get("download_dir"), config.get("database"),
+        sorted(config["downloadable_sites"]),
+    )
     return config
 
 

@@ -30,12 +30,14 @@ Usage
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+log = logging.getLogger(__name__)
 
 STATUS_PENDING  = "pending"
 STATUS_UPLOADED = "uploaded"
@@ -50,6 +52,7 @@ class FileDB:
         self._con  = sqlite3.connect(str(self._path), check_same_thread=False)
         self._con.row_factory = sqlite3.Row
         self._init_schema()
+        log.debug("FileDB opened: %s", self._path)
 
     # ── Schema ────────────────────────────────────────────────────────────────
 
@@ -64,7 +67,11 @@ class FileDB:
                 source_url     TEXT,
                 file_size      INTEGER,
                 downloaded_at  TEXT,
-                upload_status  TEXT    NOT NULL DEFAULT 'pending'
+                upload_status  TEXT    NOT NULL DEFAULT 'pending',
+                tags           TEXT,
+                sha256         TEXT,
+                phash          TEXT,
+                hashed_at      TEXT
             );
 
             -- Future-proof table for fic records and status tracking
@@ -100,6 +107,34 @@ class FileDB:
             CREATE INDEX IF NOT EXISTS idx_ff_fandom   ON fanfiction(fandom);
             CREATE INDEX IF NOT EXISTS idx_ff_status   ON fanfiction(status);
         """)
+
+        # Backfill columns for existing artists_media tables created by older versions.
+        try:
+            cols = {
+                row[1]
+                for row in self._con.execute("PRAGMA table_info(artists_media)").fetchall()
+            }
+            add_cols = {
+                "tags":      "TEXT",
+                "sha256":    "TEXT",
+                "phash":     "TEXT",
+                "hashed_at": "TEXT",
+            }
+            for name, typ in add_cols.items():
+                if name not in cols:
+                    self._con.execute(f"ALTER TABLE artists_media ADD COLUMN {name} {typ}")
+        except Exception:
+            pass
+
+        # Hash indexes created only after the columns are guaranteed to exist
+        # (old DBs need the ALTER TABLE above to run first).
+        try:
+            self._con.executescript("""
+                CREATE INDEX IF NOT EXISTS idx_am_sha256 ON artists_media(sha256);
+                CREATE INDEX IF NOT EXISTS idx_am_phash  ON artists_media(phash);
+            """)
+        except Exception:
+            pass
 
         # Backfill columns for existing fanfiction tables created by older versions.
         try:
@@ -174,6 +209,8 @@ class FileDB:
                 downloaded_at = excluded.downloaded_at
         """, (filename, fp, artist, site, source_url, file_size, now))
         self._con.commit()
+        log.debug("register: %s (artist=%s site=%s size=%d bytes)",
+                  fp, artist or "-", site or "-", file_size)
 
     def set_status(self, filepath: str | Path, status: str) -> None:
         if status not in ALL_STATUSES:
@@ -182,6 +219,7 @@ class FileDB:
             "UPDATE artists_media SET upload_status = ? WHERE filepath = ?",
             (status, str(filepath)))
         self._con.commit()
+        log.debug("set_status: %s -> %s", filepath, status)
 
     def set_status_by_id(self, row_id: int, status: str) -> None:
         if status not in ALL_STATUSES:
@@ -190,6 +228,69 @@ class FileDB:
             "UPDATE artists_media SET upload_status = ? WHERE id = ?",
             (status, row_id))
         self._con.commit()
+        log.debug("set_status_by_id: id=%d -> %s", row_id, status)
+
+    # ── Tags ──────────────────────────────────────────────────────────────────
+
+    def set_tags(self, filepath: str | Path, tags: list[str]) -> None:
+        """
+        Store this file's tags as a JSON list. Caller is responsible for
+        also writing the .txt sidecar if it wants the two kept in sync —
+        see utils.media_tags.write_tags() which does both at once.
+        """
+        fp = str(filepath)
+        if not self.get(fp):
+            self.register(filename=Path(fp).name, filepath=fp)
+        self._con.execute(
+            "UPDATE artists_media SET tags = ? WHERE filepath = ?",
+            (json.dumps(tags, ensure_ascii=False), fp))
+        self._con.commit()
+        log.debug("set_tags: %s -> %s", fp, tags)
+
+    def get_tags(self, filepath: str | Path) -> list[str]:
+        row = self.get(filepath)
+        if not row or not row["tags"]:
+            return []
+        try:
+            return json.loads(row["tags"])
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    # ── Hashes (for duplicate detection) ───────────────────────────────────────
+
+    def set_hashes(self, filepath: str | Path,
+                   sha256: str = "", phash: str = "") -> None:
+        fp = str(filepath)
+        if not self.get(fp):
+            self.register(filename=Path(fp).name, filepath=fp)
+        now = datetime.now(timezone.utc).isoformat()
+        self._con.execute(
+            "UPDATE artists_media SET sha256 = ?, phash = ?, hashed_at = ? "
+            "WHERE filepath = ?",
+            (sha256 or None, phash or None, now, fp))
+        self._con.commit()
+        log.debug("set_hashes: %s sha256=%s phash=%s",
+                  fp, (sha256 or "-")[:12], phash or "-")
+
+    def get_hashes(self, filepath: str | Path) -> tuple[str | None, str | None]:
+        row = self.get(filepath)
+        if not row:
+            return None, None
+        return row["sha256"], row["phash"]
+
+    def all_hashed(self) -> list[sqlite3.Row]:
+        """All rows that have at least a sha256 hash recorded."""
+        return self._con.execute(
+            "SELECT * FROM artists_media WHERE sha256 IS NOT NULL"
+        ).fetchall()
+
+    def find_exact_duplicates(self) -> dict[str, list[sqlite3.Row]]:
+        """{sha256: [rows]} for every hash shared by 2+ files."""
+        rows = self.all_hashed()
+        groups: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            groups.setdefault(row["sha256"], []).append(row)
+        return {h: rs for h, rs in groups.items() if len(rs) > 1}
 
     def upsert_fanfiction(
         self,
@@ -273,6 +374,7 @@ class FileDB:
             ),
         )
         self._con.commit()
+        log.debug("upsert_fanfiction: %s (%s) status=%s", title or url, fandom or "-", status or "-")
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
@@ -374,6 +476,7 @@ class FileDB:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def close(self) -> None:
+        log.debug("FileDB closed: %s", self._path)
         self._con.close()
 
     def __enter__(self):

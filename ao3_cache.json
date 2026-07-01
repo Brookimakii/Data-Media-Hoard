@@ -144,7 +144,7 @@
     "is_series": false
   },
   "https://archiveofourown.org/works/77420841": {
-    "title": "Coral and Song",
+    "title": "Water and Song",
     "date": "2026-01-11",
     "status": "🟢",
     "chapters": "3/3",
@@ -5853,6 +5853,14 @@
     "status": "🟢",
     "chapters": "1/1",
     "word_count": "2788",
+    "is_series": false
+  },
+  "https://archiveofourown.org/works/54287863": {
+    "title": "Lack of Taste",
+    "date": "2026-06-26",
+    "status": "🟢",
+    "chapters": "55/55",
+    "word_count": "123507",
     "is_series": false
   }
 }

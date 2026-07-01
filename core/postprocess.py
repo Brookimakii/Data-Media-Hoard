@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Callable
 
 import requests
 from bs4 import BeautifulSoup
+
+log = logging.getLogger(__name__)
 
 
 _LINK_REGEX = re.compile(r"https?://[^\s'\">]+(?:#[^\s'\">]*)?", re.IGNORECASE)
@@ -69,8 +72,11 @@ def extract_links_for_job(job: dict, event_cb: Callable[[str, object], None]) ->
     """
     out_dir = Path(job.get("output", "")).resolve()
     if not out_dir.exists():
+        log.debug("extract_links_for_job: output dir doesn't exist, skipping: %s", out_dir)
         return
 
+    log.debug("extract_links_for_job: scanning %s for %s/%s",
+              out_dir, job.get("artist"), job.get("site"))
     summary_lines: list[str] = []
 
     # 1) JSON metadata files
@@ -171,8 +177,12 @@ def extract_links_for_job(job: dict, event_cb: Callable[[str, object], None]) ->
             with target.open("a", encoding="utf-8") as f:
                 f.write(payload)
             event_cb("log", f"  [postprocess] wrote link summary: {str(target)}\n")
-        except Exception:
+            log.debug("extract_links_for_job: wrote %d line(s) to %s", len(summary_lines), target)
+        except Exception as e:
             event_cb("log", "  [postprocess] failed writing link summary\n")
+            log.warning("extract_links_for_job: failed writing %s: %s", target, e)
+    else:
+        log.debug("extract_links_for_job: nothing found to write for %s", out_dir)
 
 
 __all__ = ["extract_links_for_job"]

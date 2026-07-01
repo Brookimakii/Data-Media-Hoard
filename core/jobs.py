@@ -27,9 +27,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass  # avoid circular import; build_command imported lazily below
 
+import logging
 import os
 from typing import Any
 from urllib.parse import urlparse
+
+log = logging.getLogger(__name__)
 
 
 # ── Account name extractor ────────────────────────────────────────────────────
@@ -147,6 +150,10 @@ def build_jobs(
                         "gdl_config": gdl_config,
                     })
 
+    log.debug(
+        "build_jobs: %d artist(s), %d allowed site(s) -> %d job(s)",
+        len(artists), len(downloadable_sites), len(jobs),
+    )
     return jobs
 
 

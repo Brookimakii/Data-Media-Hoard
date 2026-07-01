@@ -149,12 +149,16 @@ def setup_file_logging(
     root_logger.setLevel(level)
     root_logger.addHandler(handler)
 
-    # Also keep stderr output during development
+    # Console output: DEBUG and up, so every debug() call across the app
+    # is visible live while the app runs, not just written to the log file.
     if not any(isinstance(h, logging.StreamHandler) and h.stream is sys.stderr
                for h in root_logger.handlers):
         stderr_handler = logging.StreamHandler(sys.stderr)
-        stderr_handler.setLevel(logging.WARNING)
-        stderr_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        stderr_handler.setLevel(logging.DEBUG)
+        stderr_handler.setFormatter(logging.Formatter(
+            "%(asctime)s  %(levelname)-7s  %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        ))
         root_logger.addHandler(stderr_handler)
 
     return log_path

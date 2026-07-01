@@ -16,10 +16,13 @@ Status legend:  🟢 Finished  🟡 Dropped  🔴 Ongoing
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 try:
     import yaml as _yaml
@@ -126,8 +129,8 @@ def _sync_fic_to_db(fic_file: FicFile, fic: Fic) -> None:
             characters=fic.characters,
             warnings=fic.warnings,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("_sync_fic_to_db: failed for %s: %s", fic.url, e)
 
 
 def _parse_extras(rest: str) -> tuple[str, str, str]:
@@ -152,6 +155,7 @@ def _parse_extras(rest: str) -> tuple[str, str, str]:
 def parse_fic_file(path: str | Path) -> FicFile:
     path   = Path(path)
     result = FicFile(path=path)
+    log.debug("parse_fic_file: reading %s", path)
 
     with open(path, encoding="utf-8") as f:
         raw_lines = f.readlines()
@@ -196,6 +200,10 @@ def parse_fic_file(path: str | Path) -> FicFile:
     load_yaml_meta(result)
     for fic in result.all_fics:
         _sync_fic_to_db(result, fic)
+    log.debug(
+        "parse_fic_file: %s -> %d fandom(s), %d fic(s) total",
+        path.name, len(result.fandoms), len(result.all_fics),
+    )
     return result
 
 
@@ -231,6 +239,7 @@ def toggle_fic_enabled(fic_file: FicFile, fic: Fic) -> None:
 
     fic_file.raw_lines[fic.line_index] = new_raw
     fic_file.path.write_text("".join(fic_file.raw_lines), encoding="utf-8")
+    log.debug("toggle_fic_enabled: %s -> enabled=%s (%s)", fic.url, fic.enabled, fic_file.path.name)
     _sync_fic_to_db(fic_file, fic)
 
 
@@ -281,6 +290,8 @@ def update_fic(fic_file: FicFile, fic: Fic,
     fic.chapters   = chapters
     fic.word_count = word_count
     fic_file.path.write_text("".join(fic_file.raw_lines), encoding="utf-8")
+    log.debug("update_fic: %s -> status=%s date=%s chapters=%s (%s)",
+              fic.url, status, date, chapters, fic_file.path.name)
     _sync_fic_to_db(fic_file, fic)
 
 
@@ -315,6 +326,9 @@ def add_fic(fic_file: FicFile, fandom: str, url: str,
     if fic_file.path is None:
         raise ValueError("FicFile has no path")
 
+    log.debug("add_fic: adding %s to fandom %r (enabled=%s) in %s",
+              url, fandom, enabled, fic_file.path.name)
+
     # Build the line
     extras = ""
     if word_count:
@@ -339,6 +353,7 @@ def add_fic(fic_file: FicFile, fandom: str, url: str,
         insert_idx = insert_after + 1
     else:
         # Append fandom header + fic at end of file
+        log.debug("add_fic: fandom %r doesn't exist yet, creating header", fandom)
         header_line = f"\n# {fandom}\n"
         fic_file.raw_lines.append(header_line)
         fic_file.raw_lines.append(new_line)
@@ -398,20 +413,24 @@ def load_yaml_meta(fic_file: FicFile) -> None:
         return
     ypath = _yaml_path(fic_file.path)
     if not ypath.exists():
+        log.debug("load_yaml_meta: no sidecar at %s", ypath)
         return
     try:
         with open(ypath, encoding="utf-8") as f:
             data: dict[str, Any] = _yaml.safe_load(f) or {}
-    except Exception:
+    except Exception as e:
+        log.warning("load_yaml_meta: failed to parse %s: %s", ypath, e)
         return
 
     url_map = {f.url: f for f in fic_file.all_fics}
+    matched = 0
     for url, meta in data.items():
         if not isinstance(meta, dict):
             continue
         fic = url_map.get(url)
         if fic is None:
             continue
+        matched += 1
         fic.summary       = meta.get("summary", "")
         fic.categories    = meta.get("categories", []) or []
         fic.tags          = meta.get("tags", []) or []
@@ -421,6 +440,7 @@ def load_yaml_meta(fic_file: FicFile) -> None:
         fic.relationships = meta.get("relationships", []) or []
         fic.characters    = meta.get("characters", []) or []
         fic.warnings      = meta.get("warnings", []) or []
+    log.debug("load_yaml_meta: %s -> matched %d/%d fic(s)", ypath, matched, len(data))
 
 
 def save_yaml_meta(fic_file: FicFile) -> None:
@@ -435,9 +455,10 @@ def save_yaml_meta(fic_file: FicFile) -> None:
         try:
             with open(ypath, encoding="utf-8") as f:
                 existing = _yaml.safe_load(f) or {}
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("save_yaml_meta: failed to read existing %s: %s", ypath, e)
 
+    written = 0
     for fic in fic_file.all_fics:
         if not (fic.summary or fic.categories or fic.tags or fic.authors):
             continue
@@ -453,13 +474,15 @@ def save_yaml_meta(fic_file: FicFile) -> None:
             "characters":    fic.characters,
             "warnings":      fic.warnings,
         }
+        written += 1
 
     try:
         with open(ypath, "w", encoding="utf-8") as f:
             _yaml.dump(existing, f, allow_unicode=True,
                        default_flow_style=False, sort_keys=False)
-    except Exception:
-        pass
+        log.debug("save_yaml_meta: wrote %d fic(s) (%d total) to %s", written, len(existing), ypath)
+    except Exception as e:
+        log.warning("save_yaml_meta: failed to write %s: %s", ypath, e)
 
 
 def update_fic_meta(fic_file: FicFile, fic: Fic,

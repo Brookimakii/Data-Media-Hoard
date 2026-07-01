@@ -12,12 +12,15 @@ automatically. work.completed is a clean bool — no "[Invalid DateTime]".
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+log = logging.getLogger(__name__)
 
 try:
     import requests
@@ -70,19 +73,24 @@ def init_session(username: str, password: str,
     """
     global _session
     if not _DEPS_OK:
+        log.debug("init_session: AO3 client library not available, skipping")
         return False
     if not username or not password:
+        log.debug("init_session: no credentials provided, skipping")
         return False
     try:
         if log_cb:
             log_cb(f"[ao3] logging in as {username}...\n")
+        log.debug("init_session: logging in as %s", username)
         _session = AO3.Session(username, password)
         if log_cb:
             log_cb(f"[ao3] logged in OK\n")
+        log.debug("init_session: login OK for %s", username)
         return True
     except Exception as e:
         if log_cb:
             log_cb(f"[ao3] login failed: {e}\n")
+        log.warning("init_session: login failed for %s: %s", username, e)
         _session = None
         return False
 
@@ -505,8 +513,11 @@ def scrape_work(url: str, gdl_config: str | None = None,
         if cached:
             if log_cb:
                 log_cb(f"[cache] skipping complete: {url}\n")
+            log.debug("scrape_work: cache hit for %s", url)
             return cached
 
+    kind = "series" if "/series/" in url else "work"
+    log.debug("scrape_work: scraping %s (%s)", url, kind)
     if "/series/" in url:
         info = _scrape_series(url, log_cb=log_cb)
     else:
@@ -526,9 +537,12 @@ def scrape_works_async(
     pause_event: threading.Event | None = None,
     force: bool = False,
 ) -> threading.Thread:
+    log.debug("scrape_works_async: starting for %d fic(s), force=%s", len(fics), force)
+
     def _worker() -> None:
         for fic in fics:
             if stop_event and stop_event.is_set():
+                log.debug("scrape_works_async: stop requested, aborting")
                 break
             # Spin-wait while paused
             while pause_event and pause_event.is_set():
@@ -540,6 +554,7 @@ def scrape_works_async(
             info = scrape_work(fic.url, gdl_config=gdl_config,
                                log_cb=log_cb, force=force)
             on_result(fic, info)
+        log.debug("scrape_works_async: finished")
         on_done()
 
     t = threading.Thread(target=_worker, daemon=True)
@@ -560,8 +575,12 @@ def init_cache(path: str | Path) -> None:
     if _cache_path.exists():
         try:
             _cache = json.loads(_cache_path.read_text(encoding="utf-8"))
-        except Exception:
+            log.debug("init_cache: loaded %d entries from %s", len(_cache), _cache_path)
+        except Exception as e:
+            log.warning("init_cache: failed to parse %s: %s", _cache_path, e)
             _cache = {}
+    else:
+        log.debug("init_cache: no existing cache at %s, starting fresh", _cache_path)
 
 
 def _save_cache() -> None:
@@ -573,8 +592,9 @@ def _save_cache() -> None:
                 encoding="utf-8",
             )
             _cache_dirty = False
-        except Exception:
-            pass
+            log.debug("_save_cache: wrote %d entries to %s", len(_cache), _cache_path)
+        except Exception as e:
+            log.warning("_save_cache: failed to write %s: %s", _cache_path, e)
 
 
 def _cache_key(url: str) -> str:

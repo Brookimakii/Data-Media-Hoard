@@ -19,6 +19,7 @@ tightly coupled by the shared event queue:
 
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import re
@@ -31,6 +32,8 @@ from pathlib import Path
 from typing import Callable
 
 from utils.logger import SessionLogger
+
+log = logging.getLogger(__name__)
 
 
 # ── Event types posted to the queue ──────────────────────────────────────────
@@ -146,6 +149,7 @@ def run_gallery_dl(
     if logger:
         logger.info(f"START {job['artist']} / {job['site']}")
         logger.info(f"$ {cmd_str}")
+    log.debug("run_gallery_dl: starting %s / %s -> %s", job['artist'], job['site'], cmd_str)
 
     error_lines: list[str] = []
 
@@ -177,8 +181,8 @@ def run_gallery_dl(
                 source_url=job.get("url", ""),
                 file_size=p.stat().st_size if p.exists() else 0,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("run_gallery_dl: _register_file_in_db failed for %r: %s", raw_path, e)
 
 
     def _extract_title_from_html(text: str) -> str | None:
@@ -334,6 +338,7 @@ def run_gallery_dl(
             # Pause — block here until resumed; check stop immediately after waking
             if pause_event and pause_event.is_set():
                 event_cb("log", "\n  [PAUSED]\n")
+                log.debug("run_gallery_dl: paused %s / %s", job['artist'], job['site'])
                 while pause_event.is_set():  # spin until resumed
                     pause_event.wait(timeout=0.1)  # wake periodically to check stop
                     if stop_event and stop_event.is_set():
@@ -341,15 +346,18 @@ def run_gallery_dl(
                 if stop_event and stop_event.is_set():
                     proc.terminate()
                     event_cb("log", "\n  [STOPPED]\n")
+                    log.debug("run_gallery_dl: stopped (while paused) %s / %s", job['artist'], job['site'])
                     if logger:
                         logger.info(f"STOPPED {job['artist']} / {job['site']}")
                     proc.wait()
                     return False, error_lines
                 event_cb("log", "  [RESUMED]\n")
+                log.debug("run_gallery_dl: resumed %s / %s", job['artist'], job['site'])
 
             if stop_event and stop_event.is_set():
                 proc.terminate()
                 event_cb("log", "\n  [STOPPED]\n")
+                log.debug("run_gallery_dl: stopped %s / %s", job['artist'], job['site'])
                 if logger:
                     logger.info(f"STOPPED {job['artist']} / {job['site']}")
                 proc.wait()
@@ -385,15 +393,18 @@ def run_gallery_dl(
         deleted = delete_empty_files(job["output"])
         if deleted:
             event_cb("log", f"  [cleanup] removed {deleted} empty file(s)\n")
+            log.debug("run_gallery_dl: cleaned up %d empty file(s) in %s", deleted, job["output"])
 
         # Post-process: extract links using the generic extractor
         try:
             from core.postprocess import extract_links_for_job
 
             extract_links_for_job(job, event_cb)
-        except Exception:
+        except Exception as e:
             # Never let the post-process crash the download; log and continue
             event_cb("log", "  [postprocess] link extraction failed (see logs)\n")
+            log.warning("run_gallery_dl: postprocess link extraction failed for %s/%s: %s",
+                       job['artist'], job['site'], e)
 
         success    = proc.returncode == 0
         status_str = "OK" if success else f"EXIT {proc.returncode}"
@@ -402,12 +413,17 @@ def run_gallery_dl(
         if logger:
             log_fn = logger.info if success else logger.error
             log_fn(f"{status_str} {job['artist']} / {job['site']}")
+        log.debug(
+            "run_gallery_dl: finished %s / %s -> %s (files=%d skipped=%d errors=%d)",
+            job['artist'], job['site'], status_str, file_count, skip_count, len(error_lines),
+        )
 
         return success, error_lines
 
     except FileNotFoundError:
         msg = "[ERROR] gallery-dl not found — is it installed and on PATH?\n"
         event_cb("log", msg)
+        log.error("run_gallery_dl: gallery-dl executable not found on PATH")
         if logger:
             logger.error(msg.strip())
         return False, error_lines
@@ -415,6 +431,7 @@ def run_gallery_dl(
     except Exception as exc:
         msg = f"[ERROR] {exc}\n"
         event_cb("log", msg)
+        log.error("run_gallery_dl: unexpected error for %s/%s: %s", job['artist'], job['site'], exc)
         if logger:
             logger.error(msg.strip())
         return False, error_lines
@@ -459,12 +476,18 @@ class DownloadController:
     ) -> None:
         """Start downloading. No-op if already running."""
         if self._thread and self._thread.is_alive():
+            log.debug("DownloadController.start: already running, ignoring")
             return
         self._stop_evt.clear()
         self._pause_evt.clear()
 
         # Guard against invalid values from UI/state.
         max_parallel = max(1, int(max_parallel))
+
+        log.debug(
+            "DownloadController.start: %d job(s), parallel=%s, max_parallel=%d",
+            len(jobs), parallel, max_parallel,
+        )
 
         if self._logger:
             self._logger.start_session("download")
@@ -485,15 +508,18 @@ class DownloadController:
         next line of output, and no further jobs are started.
         Also clears the pause event so the thread can wake up and see the stop.
         """
+        log.debug("DownloadController.stop requested")
         self._pause_evt.clear()   # wake thread if paused so it can see stop
         self._stop_evt.set()
 
     def pause(self) -> None:
         """Pause after the current output line is processed."""
+        log.debug("DownloadController.pause requested")
         self._pause_evt.set()
 
     def resume(self) -> None:
         """Resume a paused download."""
+        log.debug("DownloadController.resume requested")
         self._pause_evt.clear()
 
     @property
@@ -633,4 +659,8 @@ class DownloadController:
         if self._logger:
             self._logger.end_session()
 
+        log.debug(
+            "DownloadController._run: finished all jobs, %d error group(s)",
+            len(errors_recap),
+        )
         self._emit("done", errors_recap)

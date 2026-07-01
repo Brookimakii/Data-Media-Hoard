@@ -17,9 +17,12 @@ Tag file layout:
 from __future__ import annotations
 
 import json
+import logging
+import re
 from pathlib import Path
 from typing import Any
 
+log = logging.getLogger(__name__)
 
 # ── File names ─────────────────────────────────────────────────────────────────
 UPLOADED_DNU_FILE   = "uploaded_dnu.json"
@@ -72,6 +75,7 @@ class UploadedDNU:
     def __init__(self, data_dir: str | Path) -> None:
         self._path = Path(data_dir) / UPLOADED_DNU_FILE
         self._tree: dict = _read_json(self._path) or {}
+        log.debug("UploadedDNU loaded: %s", self._path)
 
     def is_dnu(self, base: Path, file: Path) -> bool:
         return _get_nested(self._tree, _path_to_parts(base, file)) == 0
@@ -83,13 +87,16 @@ class UploadedDNU:
         return _get_nested(self._tree, _path_to_parts(base, file)) is None
 
     def mark_dnu(self, base: Path, file: Path) -> None:
+        log.debug("UploadedDNU: mark_dnu %s", file)
         _set_nested(self._tree, _path_to_parts(base, file), 0)
 
     def mark_uploaded(self, base: Path, file: Path) -> None:
+        log.debug("UploadedDNU: mark_uploaded %s", file)
         _set_nested(self._tree, _path_to_parts(base, file), 1)
 
     def save(self) -> None:
         _write_json(self._path, self._tree)
+        log.debug("UploadedDNU saved: %s", self._path)
 
 
 # ── Tag catalogues ─────────────────────────────────────────────────────────────
@@ -125,14 +132,22 @@ def load_copyright_tags(data_dir: str | Path) -> TagCatalogue:
 def scan_upload_folder(folder: str | Path, dnu_registry: UploadedDNU) -> list[Path]:
     folder = Path(folder)
     pending: list[Path] = []
+    skipped_uploaded = 0
+    skipped_dnu = 0
     for f in sorted(folder.rglob("*")):
         if f.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
         if dnu_registry.is_uploaded(folder, f):
+            skipped_uploaded += 1
             continue
         if dnu_registry.is_dnu(folder, f):
+            skipped_dnu += 1
             continue
         pending.append(f)
+    log.debug(
+        "scan_upload_folder: %s -> %d pending, %d already uploaded, %d DNU",
+        folder, len(pending), skipped_uploaded, skipped_dnu,
+    )
     return pending
 
 
@@ -149,17 +164,16 @@ def find_tag_file(image_path: Path, base: Path) -> Path | None:
     current = image_path.parent
 
     while True:
-        print(f"[tag lookup] searching for {target} under {current}")
+        log.debug("find_tag_file: searching for %s under %s", target, current)
         matches = [p for p in current.rglob(target) if p.is_file()]
         if matches:
-            print(f"[tag lookup] FOUND: {matches[0]}")
+            log.debug("find_tag_file: found %s", matches[0])
             return matches[0]
-        print(f"[tag lookup] not found")
         if current == base or current == current.parent:
             break
         current = current.parent
 
-    print(f"[tag lookup] NOT FOUND anywhere up to {base}")
+    log.debug("find_tag_file: not found anywhere up to %s", base)
     return None
 
 
@@ -178,9 +192,7 @@ def read_tag_file(image_path: Path, base: Path) -> list[str]:
     Prepends the artist name (first directory below base).
     Returns [artist_name] if no tag file is found.
     """
-    import re
-
-    print(f"[read_tag_file] image={image_path}  base={base}")
+    log.debug("read_tag_file: image=%s base=%s", image_path, base)
 
     try:
         artist = image_path.relative_to(base).parts[0]
@@ -195,7 +207,39 @@ def read_tag_file(image_path: Path, base: Path) -> list[str]:
     tags = [t for t in re.split(r"[\s,]+", tag_file.read_text(encoding="utf-8")) if t.strip()]
     if artist and artist not in tags:
         tags.insert(0, artist)
+    log.debug("read_tag_file: %s -> %s", image_path.name, tags)
     return tags
+
+
+def write_tag_file(image_path: Path, base: Path, tags: list[str]) -> Path:
+    """
+    Write *tags* to this image's sidecar .txt file.
+
+    If a sidecar already exists anywhere up the tree (per find_tag_file's
+    search), overwrite that one so there's never more than one tag file
+    per image. Otherwise create a new one at the canonical location:
+        base / artist / .tags / site / image.txt
+    derived from the image's own path (base / artist / site / [account /] image.ext).
+
+    The artist name is NOT included in the written tags — read_tag_file()
+    already prepends it on read, so storing it too would duplicate it.
+    """
+    existing = find_tag_file(image_path, base)
+    if existing is not None:
+        target = existing
+    else:
+        try:
+            parts = list(image_path.relative_to(base).parts)
+        except ValueError:
+            parts = [image_path.parent.name, image_path.parent.name]
+        artist = parts[0] if parts else image_path.parent.name
+        site   = parts[1] if len(parts) > 1 else "unknown"
+        target = base / artist / ".tags" / site / (image_path.stem + ".txt")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(" ".join(tags), encoding="utf-8")
+    log.debug("write_tag_file: %s -> %s (tags=%s)", image_path.name, target, tags)
+    return target
 
 
 # ── Source derivation ──────────────────────────────────────────────────────────
@@ -275,14 +319,14 @@ def _description_from_sidecar(image_path: Path) -> str | None:
     for key in ("description", "caption", "content", "full_text", "text", "body"):
         val = data.get(key)
         if isinstance(val, str) and val.strip():
-            print(f"[sidecar] found description in key '{key}'")
+            log.debug("find_sidecar_description: found in key '%s' (%s)", key, meta.name)
             return val.strip()
         # Fanbox stores body as a dict with nested blocks
         if isinstance(val, dict):
             # Try body.text directly
             text = val.get("text")
             if isinstance(text, str) and text.strip():
-                print(f"[sidecar] found description in key '{key}.text'")
+                log.debug("find_sidecar_description: found in key '%s.text' (%s)", key, meta.name)
                 return text.strip()
             # Try body.blocks[].text (Fanbox article format)
             blocks = val.get("blocks", [])
@@ -290,10 +334,10 @@ def _description_from_sidecar(image_path: Path) -> str | None:
                 parts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("text")]
                 joined = "\n".join(parts).strip()
                 if joined:
-                    print(f"[sidecar] found description in key '{key}.blocks'")
+                    log.debug("find_sidecar_description: found in key '%s.blocks' (%s)", key, meta.name)
                     return joined
 
-    print(f"[sidecar] no description field found in {meta.name}")
+    log.debug("find_sidecar_description: no description field found in %s", meta.name)
     return None
 
 
@@ -315,12 +359,14 @@ def fetch_description(source_url: str, image_path: Path | None = None) -> str:
             return desc
 
     if not source_url or not source_url.startswith("http"):
+        log.debug("fetch_description: no usable source_url (%r), skipping", source_url)
         return ""
 
     try:
         import requests
         from urllib.parse import urlparse
     except ImportError:
+        log.debug("fetch_description: requests not installed, skipping network fetch")
         return ""
 
     parsed = urlparse(source_url)
@@ -335,6 +381,7 @@ def fetch_description(source_url: str, image_path: Path | None = None) -> str:
             # Convert post URL to API URL
             # e.g. https://danbooru.donmai.us/posts/123 → /posts/123.json
             api_url = source_url.rstrip("/") + ".json"
+            log.debug("fetch_description: danbooru-family API GET %s", api_url)
             r = requests.get(api_url, headers=headers, timeout=15)
             if r.ok:
                 data = r.json()
@@ -349,6 +396,7 @@ def fetch_description(source_url: str, image_path: Path | None = None) -> str:
             if m:
                 illust_id = m.group(1)
                 api_url = f"https://www.pixiv.net/ajax/illust/{illust_id}"
+                log.debug("fetch_description: pixiv API GET %s", api_url)
                 r = requests.get(api_url, headers={**headers, "Referer": "https://www.pixiv.net/"}, timeout=15)
                 if r.ok:
                     data = r.json()
@@ -358,6 +406,7 @@ def fetch_description(source_url: str, image_path: Path | None = None) -> str:
         # Twitter's API requires auth; scraping is unreliable.
         # TODO: implement with a Twitter API key or nitter instance.
         if any(h in host for h in ("twitter.com", "x.com")):
+            log.debug("fetch_description: twitter/x not supported, skipping")
             return ""
 
         # ── Bluesky ───────────────────────────────────────────────────────────
@@ -371,6 +420,7 @@ def fetch_description(source_url: str, image_path: Path | None = None) -> str:
                     f"https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread"
                     f"?uri=at://{handle}/app.bsky.feed.post/{rkey}&depth=0"
                 )
+                log.debug("fetch_description: bluesky API GET %s", api_url)
                 r = requests.get(api_url, headers=headers, timeout=15)
                 if r.ok:
                     thread = r.json().get("thread", {})
@@ -381,17 +431,21 @@ def fetch_description(source_url: str, image_path: Path | None = None) -> str:
         # ── Fanbox ────────────────────────────────────────────────────────────
         if "fanbox" in host:
             # TODO: requires Fanbox session cookie for paid posts.
+            log.debug("fetch_description: fanbox requires auth, skipping")
             return ""
 
         # ── Patreon ───────────────────────────────────────────────────────────
         if "patreon" in host:
             # TODO: requires Patreon auth token for paywalled posts.
+            log.debug("fetch_description: patreon requires auth, skipping")
             return ""
 
         # ── Generic HTML fallback ─────────────────────────────────────────────
         # Try to extract a description meta tag or common caption selectors.
+        log.debug("fetch_description: generic HTML fallback GET %s", source_url)
         r = requests.get(source_url, headers=headers, timeout=15)
         if not r.ok:
+            log.debug("fetch_description: %s returned HTTP %s", source_url, r.status_code)
             return ""
 
         try:
@@ -415,5 +469,5 @@ def fetch_description(source_url: str, image_path: Path | None = None) -> str:
             return ""
 
     except Exception as e:
-        print(f"[fetch_description] error for {source_url}: {e}")
+        log.warning("fetch_description: error for %s: %s", source_url, e)
         return ""
