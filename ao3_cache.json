@@ -2556,7 +2556,7 @@
     "date": "2024-11-03",
     "status": "🟢",
     "chapters": "90/90",
-    "word_count": "255561",
+    "word_count": "255583",
     "is_series": false
   },
   "https://archiveofourown.org/works/48182713": {
@@ -5861,6 +5861,14 @@
     "status": "🟢",
     "chapters": "55/55",
     "word_count": "123507",
+    "is_series": false
+  },
+  "https://archiveofourown.org/works/86853336": {
+    "title": "quick to steal a kiss (my teeth will only cut your lips)",
+    "date": "2026-07-01",
+    "status": "🟢",
+    "chapters": "1/1",
+    "word_count": "10083",
     "is_series": false
   }
 }
