@@ -115,6 +115,7 @@
       "include": "gallery",
       "layout": "auto",
       "directory": [],
+      "user-agent": "user-agent",
       "cookies": "./cookies/www.furaffinity.net_cookies.txt"
     },
     "gelbooru": {
@@ -248,7 +249,7 @@
       "tags": "original",
       "ugoira": true,
       "cookies": {
-        "PHPSESSID": "45943048_GSSvCl6H1zUsER0JaQt6AqrEAAjWY79D"
+        "PHPSESSID": "45943048_tNi54Lm8J5A1SvWDUGOmDy8jHay00AWT"
       }
     },
     "reactor": {

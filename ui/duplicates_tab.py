@@ -30,8 +30,7 @@ from core.file_db import get_db
 from core.media_scan import (
     DEFAULT_PHASH_THRESHOLD,
     DuplicateGroup,
-    find_exact_duplicate_groups,
-    find_near_duplicate_groups,
+    find_all_duplicate_groups,
     get_video_duration,
     hash_and_store,
     iter_image_files,
@@ -39,6 +38,7 @@ from core.media_scan import (
     open_thumbnail_image,
     is_video,
     ffmpeg_available,
+    imagehash_available,
 )
 from ui.scroll import register_scroll_canvas
 from ui.theme import (
@@ -141,29 +141,14 @@ _META_LOWER     = "#e08a3c"   # orange
 
 def _build_metadata_grid(parent: tk.Widget, fields_a: list, fields_b: list) -> None:
     """
-    Render fields_a/fields_b (from _file_metadata_fields) as two separate
-    blocks, LEFT entirely above RIGHT:
-        LEFT
-        name      ...
-        path      ...
-        ...
-        ----------------
-        RIGHT
-        name      ...
-        path      ...
-        ...
-    LEFT's rows are left-aligned, RIGHT's rows are right-aligned. Colors
-    follow the rules in the module docstring (green/red/yellow/orange),
-    computed once per field and reused in both blocks so the two sides
-    always agree on which color a given field gets.
-
-    Assumes fields_a and fields_b share the same labels in the same
-    order, which _file_metadata_fields always produces.
+    Render one row per field:
+        FIELD LABEL   |  LEFT value   |  RIGHT value
+    Colors: green=same, red=diff, yellow=higher numeric, orange=lower numeric.
     """
     for w in parent.winfo_children():
         w.destroy()
 
-    # Compute each field's color pair once, shared between both blocks.
+    # Compute colors once.
     colors: list[tuple[str, str]] = []
     for fa, fb in zip(fields_a, fields_b):
         if fa.value == fb.value:
@@ -176,30 +161,29 @@ def _build_metadata_grid(parent: tk.Widget, fields_a: list, fields_b: list) -> N
         else:
             colors.append((_META_DIFF, _META_DIFF))
 
-    container = tk.Frame(parent, bg=ENTRY_BG)
-    container.pack(fill="both", expand=True)
+    grid = tk.Frame(parent, bg=ENTRY_BG)
+    grid.pack(fill="both", expand=True)
+    grid.columnconfigure(0, weight=0, minsize=80)   # field label
+    grid.columnconfigure(1, weight=1)               # left value
+    grid.columnconfigure(2, weight=1)               # right value
 
-    # ── LEFT block ────────────────────────────────────────────────────────────
-    tk.Label(container, text="LEFT", bg=ENTRY_BG, fg=ACCENT2, font=FONT_BOLD,
-             anchor="w", justify="left").pack(fill="x", pady=(0, 4))
-    for field, (color_a, _) in zip(fields_a, colors):
-        tk.Label(container, text=field.label.upper(), bg=ENTRY_BG, fg=FG_DIM,
-                 font=FONT_BOLD, anchor="w", justify="left").pack(fill="x")
-        tk.Label(container, text=field.value, bg=ENTRY_BG, fg=color_a, font=FONT_MONO,
-                 anchor="w", justify="left", wraplength=220,
-                 ).pack(fill="x", pady=(0, 6))
+    # Header row
+    tk.Label(grid, text="", bg=ENTRY_BG).grid(row=0, column=0, sticky="w")
+    tk.Label(grid, text="LEFT", bg=ENTRY_BG, fg=ACCENT2, font=FONT_BOLD,
+             anchor="w").grid(row=0, column=1, sticky="w", pady=(0, 6))
+    tk.Label(grid, text="RIGHT", bg=ENTRY_BG, fg=ACCENT2, font=FONT_BOLD,
+             anchor="w").grid(row=0, column=2, sticky="w", pady=(0, 6))
 
-    tk.Frame(container, bg=BORDER, height=1).pack(fill="x", pady=10)
-
-    # ── RIGHT block ───────────────────────────────────────────────────────────
-    tk.Label(container, text="RIGHT", bg=ENTRY_BG, fg=ACCENT2, font=FONT_BOLD,
-             anchor="e", justify="right").pack(fill="x", pady=(0, 4))
-    for field, (_, color_b) in zip(fields_b, colors):
-        tk.Label(container, text=field.label.upper(), bg=ENTRY_BG, fg=FG_DIM,
-                 font=FONT_BOLD, anchor="e", justify="right").pack(fill="x")
-        tk.Label(container, text=field.value, bg=ENTRY_BG, fg=color_b, font=FONT_MONO,
-                 anchor="e", justify="right", wraplength=220,
-                 ).pack(fill="x", pady=(0, 6))
+    for row_i, (fa, fb, (ca, cb)) in enumerate(zip(fields_a, fields_b, colors), start=1):
+        tk.Label(grid, text=fa.label.upper(), bg=ENTRY_BG, fg=FG_DIM,
+                 font=FONT_BOLD, anchor="w",
+                 ).grid(row=row_i, column=0, sticky="w", pady=2, padx=(0, 8))
+        tk.Label(grid, text=fa.value, bg=ENTRY_BG, fg=ca, font=FONT_MONO,
+                 anchor="w", justify="left", wraplength=160,
+                 ).grid(row=row_i, column=1, sticky="w", pady=2)
+        tk.Label(grid, text=fb.value, bg=ENTRY_BG, fg=cb, font=FONT_MONO,
+                 anchor="w", justify="left", wraplength=160,
+                 ).grid(row=row_i, column=2, sticky="w", pady=2, padx=(16, 0))
 
 
 class _ComparePane(tk.Frame):
@@ -759,6 +743,16 @@ def build_duplicates(parent: tk.Frame) -> None:
             wraplength=700,
         ).pack(fill="x", padx=PAD_OUTER, pady=(0, 6))
 
+    if not imagehash_available():
+        tk.Label(
+            params_body,
+            text="⚠ 'imagehash' package not installed — near-duplicate detection "
+                 "will find NOTHING (exact duplicates still work fine). Run:  "
+                 "pip install imagehash   then restart.",
+            bg=PANEL, fg=COLOR_FAIL, font=FONT_MONO, anchor="w", justify="left",
+            wraplength=700,
+        ).pack(fill="x", padx=PAD_OUTER, pady=(0, 6))
+
     divider(params_body)
 
     # ── Scan controls ───────────────────────────────────────────────────────────
@@ -954,7 +948,7 @@ def build_duplicates(parent: tk.Frame) -> None:
 
         hdr = tk.Frame(inner, bg=ENTRY_BG, cursor="hand2")
         hdr.pack(fill="x", pady=(0, 8))
-        label = "Identical files" if group.kind == "exact" else f"Similar (distance {group.distance})"
+        label = "Identical files" if group.kind == "exact" else f"Similar / mixed (distance {group.distance})"
         hdr_lbl = tk.Label(hdr, text=label, bg=ENTRY_BG, fg=FG, font=FONT_BOLD, cursor="hand2")
         hdr_lbl.pack(side="left")
         tk.Label(hdr, text="  (click to open in comparator)", bg=ENTRY_BG, fg=FG_DIM,
@@ -1079,11 +1073,15 @@ def build_duplicates(parent: tk.Frame) -> None:
                 )
 
                 threshold = thresh_var.get()
-                exact_groups = find_exact_duplicate_groups(db)
-                near_groups  = (
-                    find_near_duplicate_groups(db, threshold=threshold, exclude_exact=True)
-                    if threshold > 0 else []
-                )
+                # threshold=0 on the slider means "exact match only" — pass
+                # a negative distance so no phash edge can ever qualify,
+                # which disables near-merging entirely while still using
+                # the same unified function (so exact-in-exact collapsing
+                # of same-real-file rows stays consistent either way).
+                merge_threshold = threshold if threshold > 0 else -1
+                all_groups = find_all_duplicate_groups(db, threshold=merge_threshold)
+                exact_groups = [g for g in all_groups if g.kind == "exact"]
+                near_groups  = [g for g in all_groups if g.kind == "near"]
             finally:
                 for lg, lvl in zip(noisy_loggers, previous_levels):
                     lg.setLevel(lvl)

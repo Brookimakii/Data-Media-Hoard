@@ -79,6 +79,33 @@ def ffmpeg_available() -> bool:
     return available
 
 
+@lru_cache(maxsize=1)
+def imagehash_available() -> bool:
+    """
+    True if the 'imagehash' package can be imported. Cached, and logs a
+    loud warning the first time it's checked and missing — without this,
+    compute_phash() used to fail silently on every single file forever
+    (ImportError caught, None returned, nothing logged), which meant
+    near-duplicate detection would just quietly return zero results with
+    no indication why. If this is False, run: pip install imagehash
+    """
+    try:
+        import imagehash  # noqa: F401
+        available = True
+    except ImportError:
+        available = False
+    if not available:
+        log.warning(
+            "imagehash_available() = False — the 'imagehash' package is not "
+            "installed in this Python environment. Near-duplicate detection "
+            "will find NOTHING (every phash will be empty) until you run: "
+            "pip install imagehash   (or: pip install -r requirements.txt)"
+        )
+    else:
+        log.debug("imagehash_available() = True")
+    return available
+
+
 def is_video(path: Path) -> bool:
     return path.suffix.lower() in VIDEO_EXTENSIONS
 
@@ -185,14 +212,20 @@ def compute_phash(path: Path) -> str | None:
     """
     Perceptual hash as a hex string, or None if:
       - the file can't be read as an image (corrupt file, unsupported format)
-      - Pillow/imagehash aren't installed
+      - Pillow/imagehash aren't installed (see imagehash_available() — this
+        used to fail completely silently, making near-dup detection return
+        nothing with no explanation; now it logs a warning via that check)
       - it's a video and ffmpeg isn't available to extract a frame
       - frame extraction otherwise fails (corrupt/unreadable video)
     """
+    if not imagehash_available():
+        return None   # imagehash_available() already logged why
+
     try:
         from PIL import Image
         import imagehash
-    except ImportError:
+    except ImportError as e:
+        log.warning("compute_phash: unexpected import failure for %s: %s", path.name, e)
         return None
 
     if is_video(path):
@@ -202,7 +235,8 @@ def compute_phash(path: Path) -> str | None:
         try:
             with Image.open(frame_path) as img:
                 return str(imagehash.phash(img))
-        except Exception:
+        except Exception as e:
+            log.debug("compute_phash: failed on video frame for %s: %s", path.name, e)
             return None
         finally:
             frame_path.unlink(missing_ok=True)
@@ -210,7 +244,8 @@ def compute_phash(path: Path) -> str | None:
     try:
         with Image.open(path) as img:
             return str(imagehash.phash(img))
-    except Exception:
+    except Exception as e:
+        log.debug("compute_phash: failed for %s: %s", path.name, e)
         return None
 
 
@@ -272,11 +307,19 @@ def hash_file(path: Path) -> HashResult:
 
 def needs_hashing(db: FileDB, path: Path) -> bool:
     """
-    True if this file has no cached hash yet, or its size on disk no
-    longer matches what's recorded — i.e. it changed since last hashed.
+    True if this file has no cached sha256 or phash yet, or its size on
+    disk no longer matches what's recorded — i.e. it changed since last
+    hashed.
+
+    Checks phash as well as sha256: a row can have sha256 set but phash
+    NULL (e.g. hashed before phash support existed, or a prior run where
+    'imagehash' wasn't installed) — without this check such rows are
+    silently treated as "already hashed" forever and never get a phash,
+    which makes near-duplicate detection return nothing for them even
+    though exact-duplicate detection still works fine.
     """
     row = db.get(str(path))
-    if row is None or not row["sha256"]:
+    if row is None or not row["sha256"] or not row["phash"]:
         return True
     try:
         current_size = path.stat().st_size
@@ -421,4 +464,126 @@ def find_near_duplicate_groups(
 
     log.debug("find_near_duplicate_groups: threshold=%d -> %d group(s) found",
               threshold, len(groups))
+    return groups
+
+
+def find_all_duplicate_groups(
+    db: FileDB,
+    threshold: int = DEFAULT_PHASH_THRESHOLD,
+) -> list[DuplicateGroup]:
+    """
+    Union-find over every hashed row: two rows end up in the same group
+    if they share an identical sha256 (exact) OR their phash Hamming
+    distance is <= threshold (near) — and this is transitive across BOTH
+    relationship types together.
+
+    This matters for a specific case find_exact_duplicate_groups() and
+    find_near_duplicate_groups() can't handle correctly on their own:
+    two separate exact-duplicate clusters that are ALSO near-duplicates
+    of each other. Running exact and near independently produces three
+    overlapping, confusing groups (exact {a1,a2}, exact {b1,b2}, and a
+    near group that picks up a1 and b1/b2 but NOT a2 — because the
+    near pass explicitly skips comparing a1 to a2 once they're already
+    known to be exact, so a2 never gets pulled into the merged cluster).
+    Union-find across both relationships at once merges all four into
+    one correct group: {a1, a2, b1, b2}.
+
+    kind = "exact" only if EVERY pair in the resulting group shares one
+           identical sha256 (a pure exact-duplicate cluster).
+    kind = "near"  otherwise — includes ordinary near-duplicate clusters
+           AND the merged case described above.
+    distance = 0 for pure exact groups; otherwise the max pairwise
+           Hamming distance among phash-differing pairs in the group.
+    """
+    rows_raw = db.all_hashed()
+
+    # Collapse rows pointing at the same real file (registered under
+    # different path spellings) — same reasoning as the two functions
+    # above: without this a single real file could appear duplicated
+    # against itself.
+    seen_real_paths: dict[str, object] = {}
+    for r in rows_raw:
+        try:
+            if not Path(r["filepath"]).exists():
+                continue
+        except OSError:
+            continue
+        real = str(Path(r["filepath"]).resolve())
+        seen_real_paths.setdefault(real, r)
+    rows = list(seen_real_paths.values())
+
+    n = len(rows)
+    if n < 2:
+        return []
+
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # Exact edges: union every row sharing the same sha256.
+    by_sha: dict[str, list[int]] = {}
+    for idx, r in enumerate(rows):
+        if r["sha256"]:
+            by_sha.setdefault(r["sha256"], []).append(idx)
+    for idxs in by_sha.values():
+        for k in idxs[1:]:
+            union(idxs[0], k)
+
+    # Near edges: pairwise phash comparison, O(n^2) — fine for personal-
+    # hoard sizes. Skip pairs already in the same component (cheap either
+    # way, but avoids a redundant distance calculation).
+    phash_idxs = [idx for idx, r in enumerate(rows) if r["phash"]]
+    for a_pos in range(len(phash_idxs)):
+        i = phash_idxs[a_pos]
+        for b_pos in range(a_pos + 1, len(phash_idxs)):
+            j = phash_idxs[b_pos]
+            if find(i) == find(j):
+                continue
+            dist = _hamming(rows[i]["phash"], rows[j]["phash"])
+            if dist <= threshold:
+                union(i, j)
+
+    components: dict[int, list[int]] = {}
+    for idx in range(n):
+        components.setdefault(find(idx), []).append(idx)
+
+    groups: list[DuplicateGroup] = []
+    for idxs in components.values():
+        if len(idxs) < 2:
+            continue
+
+        first_sha = rows[idxs[0]]["sha256"]
+        is_pure_exact = first_sha is not None and all(
+            rows[i]["sha256"] == first_sha for i in idxs
+        )
+
+        if is_pure_exact:
+            distance = 0
+        else:
+            dists = [
+                _hamming(rows[idxs[a]]["phash"], rows[idxs[b]]["phash"])
+                for a in range(len(idxs)) for b in range(a + 1, len(idxs))
+                if rows[idxs[a]]["phash"] and rows[idxs[b]]["phash"]
+            ]
+            distance = max(dists) if dists else 0
+
+        groups.append(DuplicateGroup(
+            kind="exact" if is_pure_exact else "near",
+            paths=[Path(rows[i]["filepath"]).resolve() for i in idxs],
+            distance=distance,
+        ))
+
+    log.debug("find_all_duplicate_groups: threshold=%d -> %d group(s) found (%d exact, %d near/merged)",
+              threshold, len(groups),
+              sum(1 for g in groups if g.kind == "exact"),
+              sum(1 for g in groups if g.kind == "near"))
     return groups
