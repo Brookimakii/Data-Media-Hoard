@@ -68,9 +68,9 @@
       "filter": 56027
     },
     "deviantart": {
-      "client-id": null,
-      "client-secret": null,
-      "refresh-token": null,
+      "client-id": "59970",
+      "client-secret": "8d4340076b3144c081687dc8ee4941cb",
+      "refresh-token": "cache",
       "auto-watch": false,
       "auto-unwatch": false,
       "comments": false,
@@ -230,6 +230,12 @@
     "paheal": {
       "metadata": false
     },
+    "pawchive": {
+      "cookies": "./cookies/pawchive.txt",
+      "browser": "chrome",
+      "sleep": 5,
+      "user-agent": "gallery-dl/1.32.9 (by brooki)"
+    },
     "pillowfort": {
       "external": false,
       "inline": true,
@@ -249,7 +255,7 @@
       "tags": "original",
       "ugoira": true,
       "cookies": {
-        "PHPSESSID": "45943048_tNi54Lm8J5A1SvWDUGOmDy8jHay00AWT"
+        "PHPSESSID": "45943048_u2DH4J7m8WxYeKZ9VH61OU6IrsB0twRd"
       }
     },
     "reactor": {

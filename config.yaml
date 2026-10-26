@@ -12,7 +12,6 @@ downloadable_sites:
 - furaffinity
 - tumblr
 - deviantArt
-- kemono
 - pawchive
 fic_tracker:
   fic_file: ./ao3.txt

@@ -41,6 +41,7 @@ artists:
       fanbox: https://aaassstaro.fanbox.cc/
     socials:
       kemono: https://kemono.cr/fanbox/user/11212326
+      pawchive: https://pawchive.pw/fanbox/user/11212326
       pixiv: https://www.pixiv.net/en/users/11212326
       skeb: https://skeb.jp/@aaassstaro
       twitter: https://x.com/aaassstaro
@@ -96,6 +97,7 @@ artists:
       kemono:
       - https://kemono.su/patreon/user/421052
       - https://kemono.su/gumroad/user/6287617001166
+      pawchive: https://pawchive.pw/patreon/user/421052
       pixiv: https://www.pixiv.net/en/users/1662403
       telegram: https://t.me/agiGarage
       tumblr: http://agitype01.tumblr.com/
@@ -150,6 +152,7 @@ artists:
       facebook: https://www.facebook.com/KBloodstein
       instagram: https://www.instagram.com/klaus_bloodstein
       kemono: https://kemono.cr/patreon/user/81070127
+      pawchive: https://pawchive.pw/fanbox/user/11212326
       twitter: https://x.com/K_Bloodstein
 - name: LluisAbadias
   enabled: true
@@ -198,6 +201,7 @@ artists:
     socials:
       furaffinity: https://www.furaffinity.net/user/laserlluis
       kemono: https://kemono.su/patreon/user/19367984
+      pawchive: https://pawchive.pw/patreon/user/19367984
       twitter: https://x.com/LluisAbadias
 - name: MMbct01
   enabled: true
@@ -290,6 +294,7 @@ artists:
       bluesky: https://bsky.app/profile/oro97.bsky.social
       furaffinity: https://www.furaffinity.net/user/oro97
       kemono: https://kemono.su/patreon/user/71367302
+      pawchive: https://pawchive.pw/patreon/user/71367302
       twitter:
       - https://x.com/Oro97Nsfw
       - https://twitter.com/Oro97_
@@ -338,6 +343,7 @@ artists:
       kemono:
       - https://kemono.cr/patreon/user/19938947
       - https://kemono.cr/discord/server/707333589846589500
+      pawchive: https://pawchive.pw/patreon/user/19938947
       telegram: https://t.me/pliveart
       twitter:
       - https://x.com/crocsleeve
@@ -384,8 +390,10 @@ artists:
     paid:
       fanbox: https://www.fanbox.cc/@yuio
       patreon: https://www.patreon.com/YUIOpatreon
+      pawchive: https://pawchive.pw/patreon/user/69196524
     socials:
       bluedky: https://bsky.app/profile/yuio.bsky.social
+      pawchive: https://pawchive.pw/fanbox/user/72891466
       pixiv: https://www.pixiv.net/users/72891466
       twitter: https://x.com/YUIO58ok
 - name: Ahegaokami
@@ -424,6 +432,7 @@ artists:
       Pawchive: https://pawchive.pw/patreon/user/12649788
       kemono: https://kemono.cr/patreon/user/12649788
       newground: https://ahegaokami.newgrounds.com
+      pawchive: https://pawchive.pw/patreon/user/12649788
       pillowfort: https://www.pillowfort.social/ahegaokami
       twitter:
       - https://x.com/ahegaokami

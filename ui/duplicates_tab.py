@@ -39,6 +39,7 @@ from core.media_scan import (
     is_video,
     ffmpeg_available,
     imagehash_available,
+    _hamming,
 )
 from ui.scroll import register_scroll_canvas
 from ui.theme import (
@@ -84,6 +85,76 @@ class _MetaField:
     numeric: float | None = None   # set for fields that should be yellow/orange compared
 
 
+# WD/imagehash phash default hash_size=8 -> 8x8 = 64-bit hash (confirmed
+# by the 16-hex-char values this app has always produced). Similarity %
+# is derived from Hamming distance against this fixed bit width.
+_PHASH_BITS = 64
+
+
+def _get_db_row_for_path(db, path: Path):
+    """
+    Look up a DB row for *path*, tolerant of path-string mismatches.
+
+    DuplicateGroup.paths holds Path(...).resolve()'d values (see
+    find_all_duplicate_groups), but the database's own filepath column
+    may still hold the original as-scanned string — which is not always
+    byte-identical to what .resolve() produces (different case on
+    Windows, mixed slashes, a relative path that was never normalized
+    when the row was written, etc). An exact SQL string match then
+    misses the row entirely, silently blanking out artist/site fields
+    and the similarity %% even though a row genuinely exists.
+
+    Tries the fast exact match first; if that misses, falls back to a
+    case-insensitive comparison of resolved paths across the whole
+    table. The fallback is O(n) but only runs on a miss, and this is
+    only ever called for 1-2 files at a time from the compare modal —
+    not a hot path — so the cost is negligible even for a large library.
+    """
+    row = db.get(str(path))
+    if row is not None:
+        return row
+
+    target = str(path).lower()
+    for r in db._con.execute("SELECT * FROM artists_media").fetchall():
+        stored = r["filepath"]
+        try:
+            candidate = str(Path(stored).resolve()).lower()
+        except OSError:
+            candidate = str(stored).lower()
+        if candidate == target or str(stored).lower() == target:
+            return r
+    return None
+
+
+def _similarity_percent(path_a: Path, path_b: Path) -> float | None:
+    """
+    Similarity between two files as a percentage, or None if it can't be
+    determined (no DB row / no phash cached for one or both files yet).
+
+    Byte-identical files (same sha256) are always 100%, regardless of
+    phash — this also covers the case where phash failed to compute for
+    some reason but the files are still provably identical.
+    """
+    db = get_db()
+    if db is None:
+        return None
+    row_a = _get_db_row_for_path(db, path_a)
+    row_b = _get_db_row_for_path(db, path_b)
+    if row_a is None or row_b is None:
+        return None
+
+    if row_a["sha256"] and row_a["sha256"] == row_b["sha256"]:
+        return 100.0
+
+    if not row_a["phash"] or not row_b["phash"]:
+        return None
+
+    dist = _hamming(row_a["phash"], row_b["phash"])
+    if dist < 0 or dist > _PHASH_BITS:
+        return None
+    return max(0.0, (1 - dist / _PHASH_BITS) * 100)
+
+
 def _file_metadata_fields(path: Path) -> list[_MetaField]:
     """
     Structured facts about *path* for the comparator's middle panel.
@@ -104,7 +175,7 @@ def _file_metadata_fields(path: Path) -> list[_MetaField]:
     db = get_db()
     artist = site = ""
     if db is not None:
-        row = db.get(str(path))
+        row = _get_db_row_for_path(db, path)
         if row:
             artist = row["artist"] or ""
             site   = row["site"] or ""
@@ -330,6 +401,7 @@ class _CompareWindow:
         self._all_groups: list[DuplicateGroup] = []
         self._group_index: int = 0
         self._group_lbl: tk.Label | None = None
+        self._similarity_lbl: tk.Label | None = None
         self._zoom = 1.0
         self._pan_x = 0
         self._pan_y = 0
@@ -358,6 +430,8 @@ class _CompareWindow:
         bar.pack(fill="x", padx=10, pady=8)
         tk.Label(bar, text="Scroll to zoom · drag to pan — applies to both sides",
                  bg=PANEL, fg=FG_DIM, font=FONT_MONO).pack(side="left")
+        self._similarity_lbl = tk.Label(bar, text="", bg=PANEL, fg=ACCENT2, font=FONT_BOLD)
+        self._similarity_lbl.pack(side="right")
 
         # ── Group navigation ─────────────────────────────────────────────────
         nav_row = tk.Frame(win, bg=PANEL)
@@ -493,6 +567,13 @@ class _CompareWindow:
         fields_a = _file_metadata_fields(path_a)
         fields_b = _file_metadata_fields(path_b)
         _build_metadata_grid(self._meta_frame, fields_a, fields_b)
+
+        pct = _similarity_percent(path_a, path_b)
+        if pct is None:
+            self._similarity_lbl.config(text="Similarity: —", fg=FG_DIM)
+        else:
+            color = _META_SAME if pct >= 95 else (_META_HIGHER if pct >= 80 else FG)
+            self._similarity_lbl.config(text=f"Similarity: {pct:.1f}%", fg=color)
 
     def _swap_pane(self, which: str) -> None:
         var  = self._var_a if which == "a" else self._var_b
@@ -904,19 +985,19 @@ def build_duplicates(parent: tk.Frame) -> None:
                      bg=PANEL, fg=COLOR_OK, font=FONT_BOLD).pack(anchor="w", pady=20)
             return
 
+        # One flat list, no exact/near section split — a group can contain
+        # both exact and near-duplicate relationships at once (see
+        # find_all_duplicate_groups), so a hard split was already
+        # somewhat arbitrary; showing everything together avoids that.
         all_groups = exact_groups + near_groups
         rendered_count = [0]
 
+        tk.Label(results_frame, text=f"DUPLICATE GROUPS ({len(all_groups)})",
+                 bg=PANEL, fg=ACCENT2, font=FONT_BOLD).pack(anchor="w", pady=(0, 6))
+
         def _render_batch(start: int) -> None:
             end = min(start + MAX_RENDERED_GROUPS, len(all_groups))
-            last_kind = None
             for group in all_groups[start:end]:
-                if group.kind != last_kind:
-                    title = (f"EXACT DUPLICATES ({len(exact_groups)} group(s))" if group.kind == "exact"
-                             else f"NEAR-DUPLICATES ({len(near_groups)} group(s))")
-                    tk.Label(results_frame, text=title, bg=PANEL, fg=ACCENT2, font=FONT_BOLD,
-                             ).pack(anchor="w", pady=(16, 6))
-                    last_kind = group.kind
                 _render_group(group)
             rendered_count[0] = end
 

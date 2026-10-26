@@ -40,7 +40,7 @@ _KNOWN_CATS = ["aggregators", "socials", "paid", "contacts", "streaming"]
 
 _DL_SITES = {
     "pixiv", "danbooru", "artstation", "twitter", "bluesky",
-    "furaffinity", "tumblr", "deviantart", "kemono",
+    "furaffinity", "tumblr", "deviantart", "kemono", "pawchive",
 }
 
 _DISABLED_OVERLAY = "#1a1a24"   # slightly darker bg for disabled cards
@@ -834,7 +834,7 @@ class RawEditor(tk.Frame):
 class ConfigEditor(tk.Frame):
     _SITE_CHOICES = [
         "pixiv", "danbooru", "artstation", "twitter", "bluesky",
-        "furaffinity", "tumblr", "deviantArt", "kemono",
+        "furaffinity", "tumblr", "deviantArt", "kemono", "pawchive",
     ]
 
     def __init__(self, parent: tk.Widget, **kw) -> None:
