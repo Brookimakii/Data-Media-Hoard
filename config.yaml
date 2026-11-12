@@ -4,14 +4,11 @@ archives_dir: ./archives
 log_dir: ./logs
 database: ./hoard.db
 downloadable_sites:
-- pixiv
 - danbooru
 - artstation
 - twitter
 - bluesky
-- furaffinity
 - tumblr
-- deviantArt
 - pawchive
 fic_tracker:
   fic_file: ./ao3.txt
