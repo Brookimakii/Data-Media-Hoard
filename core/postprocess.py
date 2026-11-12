@@ -12,14 +12,14 @@ from bs4 import BeautifulSoup
 log = logging.getLogger(__name__)
 
 
-_LINK_REGEX = re.compile(r"https?://[^\s'\">]+(?:#[^\s'\">]*)?", re.IGNORECASE)
+_LINK_REGEX = re.compile(r"https?://[^\s'\"<>]+(?:#[^\s'\"<>]*)?", re.IGNORECASE)
 
 
 def _extract_links_from_text(text: str) -> list[str]:
     links: list[str] = []
 
     # Mega-style: capture URL and an adjacent key that may be whitespace-separated
-    for m in re.finditer(r"(https?://(?:www\.)?mega\.nz/[^\s#'\">]+)\s*#?\s*([A-Za-z0-9_-]{8,})?",
+    for m in re.finditer(r"(https?://(?:www\.)?mega\.nz/[^\s#'\"<>]+)\s*#?\s*([A-Za-z0-9_-]{8,})?",
                          text, flags=re.IGNORECASE | re.DOTALL):
         url = m.group(1)
         key = m.group(2)
