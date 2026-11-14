@@ -54,6 +54,11 @@ class FileDB:
         self._init_schema()
         log.debug("FileDB opened: %s", self._path)
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """Shared SQLite connection, for stores that keep their tables in this DB."""
+        return self._con
+
     # ── Schema ────────────────────────────────────────────────────────────────
 
     def _init_schema(self) -> None:

@@ -8,3 +8,6 @@ AO3/
 
 .pyc
 .env
+booru_settings.json
+probe_result.json
+booru-manager-update.zip

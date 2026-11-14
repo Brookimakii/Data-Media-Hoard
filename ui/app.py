@@ -2,8 +2,8 @@
 ui/app.py
 ---------
 Root window construction and top-level layout.
-Assembles the ttk.Notebook, mounts each tab, applies the ttk theme
-overrides, and wires up the global scroll router.
+Creates the root window, applies the ttk theme overrides and mounts the
+navigation shell (ui/nav.py). Feature pages are declared in ui/features.py.
 
 Entry point: create_app() → returns the configured tk.Tk root.
 Call root.mainloop() in main.py.
@@ -15,15 +15,9 @@ import tkinter as tk
 from tkinter import ttk
 
 from ui.theme import (
-    ACCENT, BG, BORDER, ENTRY_BG, FG, FG_DIM,
-    FONT_BOLD, FONT_HEAD, FONT_MONO, FONT_SUB, PANEL,
+    ACCENT, BG, BORDER, ENTRY_BG, FG, FG_DIM, FONT_BOLD, PANEL,
 )
-from ui.scroll import bind_global_scroll
-from ui.downloader_tab import build_downloader
-from ui.uploader_tab import build_uploader
-from ui.fic_tab import build_fic_tracker
-from ui.tag_media_tab import build_tag_media
-from ui.duplicates_tab import build_duplicates
+from ui.nav import Shell
 from ui.taskbar import init_taskbar
 
 
@@ -59,60 +53,34 @@ def _apply_ttk_styles(root: tk.Tk) -> None:
     )
 
 
-def _build_title_bar(root: tk.Tk) -> None:
-    """Thin branded header above the notebook."""
-    bar = tk.Frame(root, bg=BG, pady=12)
-    bar.pack(fill="x", padx=30)
-
-    tk.Label(
-        bar, text="✦ BOORU MANAGER",
-        bg=BG, fg=ACCENT, font=FONT_HEAD,
-    ).pack(side="left")
-
-    tk.Label(
-        bar, text="personal image database toolkit",
-        bg=BG, fg=FG_DIM, font=FONT_SUB,
-    ).pack(side="left", padx=(12, 0))
-
-    tk.Frame(root, bg=BORDER, height=1).pack(fill="x")
-
-
-def create_app() -> tk.Tk:
+def create_app(root: tk.Tk | None = None, on_progress=None) -> tk.Tk:
     """
     Build and return the configured root window.
     Does not call mainloop() — that is the caller's responsibility.
+
+    root        — existing Tk root to build into (default: create one).
+    on_progress — optional callable(text) invoked before each heavy build
+                  step, used by the splash screen.
     """
-    root = tk.Tk()
+    def _progress(text: str) -> None:
+        if on_progress:
+            on_progress(text)
+
+    if root is None:
+        root = tk.Tk()
     root.title("Booru Manager")
     root.geometry("980x780")
     root.configure(bg=BG)
     root.minsize(720, 560)
 
     _apply_ttk_styles(root)
-    _build_title_bar(root)
     root.after(100, lambda: init_taskbar(root))
 
-    nb = ttk.Notebook(root)
-    nb.pack(fill="both", expand=True)
-
-    tab_dl   = tk.Frame(nb, bg=PANEL)
-    tab_up   = tk.Frame(nb, bg=PANEL)
-    tab_fic  = tk.Frame(nb, bg=PANEL)
-    tab_tag  = tk.Frame(nb, bg=PANEL)
-    tab_dupe = tk.Frame(nb, bg=PANEL)
-    nb.add(tab_dl,   text="  ↓  Downloader  ")
-    nb.add(tab_up,   text="  ↑  Uploader  ")
-    nb.add(tab_fic,  text="  📖  Fic Tracker  ")
-    nb.add(tab_tag,  text="  🏷  Tag Media  ")
-    nb.add(tab_dupe, text="  🔍  Duplicates  ")
-
-    build_downloader(tab_dl)
-    build_uploader(tab_up)
-    build_fic_tracker(tab_fic)
-    build_tag_media(tab_tag)
-    build_duplicates(tab_dupe)
-
-    bind_global_scroll(root)
+    # Existing tabs are intentionally NOT mounted for now — see ui/features.py
+    # (set a SubFeature's `builder` to plug one back in).
+    _progress("Building navigation…")
+    Shell(root)
+    _progress("Finishing…")
 
     # Clicking on any non-interactive surface removes focus from entries/buttons.
     # Skip if the click is inside a Toplevel popup (calendar, dropdown, etc.)
