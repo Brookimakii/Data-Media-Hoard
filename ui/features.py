@@ -28,6 +28,8 @@ from typing import Callable
 
 from ui.artists_page import build_artists
 from ui.booru_settings_ui import build_booru_settings
+from ui.dupes_page import build_duplicates
+from ui.tags_page import build_tags
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,8 @@ FEATURES: tuple[MacroFeature, ...] = (
             SubFeature("tag_media", "Tag Media", "🏷",
                        "Batch-tag downloaded media."),
             SubFeature("duplicates", "Duplicates", "🔍",
-                       "Find and resolve duplicate and near-duplicate files."),
+                       "Find and resolve duplicate and near-duplicate files.",
+                       builder=build_duplicates),
             SubFeature("uploader", "Uploader", "⬆",
                        "Upload your tagged media to a booru."),
         ),
@@ -85,7 +88,8 @@ FEATURES: tuple[MacroFeature, ...] = (
                        builder=build_artists,
                        settings=build_booru_settings),
             SubFeature("tags", "Tags", "🏷",
-                       "Add, edit, delete and roll back tags and their wiki."),
+                       "Add, edit, delete and roll back tags, with synonyms and implications.",
+                       builder=build_tags),
             SubFeature("pools", "Pools", "📚",
                        "Build ordered pools of posts, such as comics and series."),
             SubFeature("sets", "Sets", "🗂",
