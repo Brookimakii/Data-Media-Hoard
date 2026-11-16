@@ -20,7 +20,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 log = logging.getLogger(__name__)
 
@@ -129,11 +129,19 @@ def load_copyright_tags(data_dir: str | Path) -> TagCatalogue:
 
 # ── Image scanner ──────────────────────────────────────────────────────────────
 
-def scan_upload_folder(folder: str | Path, dnu_registry: UploadedDNU) -> list[Path]:
+def scan_upload_folder(folder: str | Path, dnu_registry: UploadedDNU,
+                       skip: "Callable[[Path], bool] | None" = None,
+                       stats: dict | None = None) -> list[Path]:
+    """Images still to upload.
+
+    `skip(path)` is an extra filter (e.g. files flagged "throw away" in the duplicate
+    review). If `stats` is given it receives the counts: uploaded, dnu, flagged.
+    """
     folder = Path(folder)
     pending: list[Path] = []
     skipped_uploaded = 0
     skipped_dnu = 0
+    skipped_flagged = 0
     for f in sorted(folder.rglob("*")):
         if f.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
@@ -143,10 +151,15 @@ def scan_upload_folder(folder: str | Path, dnu_registry: UploadedDNU) -> list[Pa
         if dnu_registry.is_dnu(folder, f):
             skipped_dnu += 1
             continue
+        if skip is not None and skip(f):
+            skipped_flagged += 1
+            continue
         pending.append(f)
+    if stats is not None:
+        stats.update(uploaded=skipped_uploaded, dnu=skipped_dnu, flagged=skipped_flagged)
     log.debug(
-        "scan_upload_folder: %s -> %d pending, %d already uploaded, %d DNU",
-        folder, len(pending), skipped_uploaded, skipped_dnu,
+        "scan_upload_folder: %s -> %d pending, %d already uploaded, %d DNU, %d flagged duplicates",
+        folder, len(pending), skipped_uploaded, skipped_dnu, skipped_flagged,
     )
     return pending
 

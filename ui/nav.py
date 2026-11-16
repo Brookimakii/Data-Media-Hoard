@@ -16,10 +16,15 @@ Routes (tuples):
 
 from __future__ import annotations
 
+import logging
+
 import tkinter as tk
 from typing import Callable, Iterator
 
 from ui.features import FEATURES, find_macro, find_sub
+from ui import back_stack
+from ui.mouse_nav import install_mouse_nav
+from ui.nav_history import NavHistory
 from ui.theme import (
     ACCENT, ACCENT2, BG, BORDER, BTN_BG, BTN_FG, BTN_HOV, ENTRY_BG, FG, FG_DIM,
     PANEL, SEL_BG,
@@ -120,6 +125,7 @@ class Shell:
         self._drawer: tk.Frame | None = None
         self._drawer_open = False
         self._anim: str | None = None
+        self._history = NavHistory()
 
         self._build_header()
         self.content = tk.Frame(root, bg=PANEL)
@@ -127,6 +133,7 @@ class Shell:
 
         root.bind("<Escape>", lambda _e: self.close_drawer())
         root.bind_all("<Button-1>", self._outside_click, add="+")
+        install_mouse_nav(root, self.go_back, self.go_forward)
         self.navigate(HOME)
 
     # ── header ────────────────────────────────────────────────────────────────
@@ -253,13 +260,29 @@ class Shell:
                          font=(_UI, 11), padx=8).pack(side="left")
 
     # ── navigation ────────────────────────────────────────────────────────────
-    def navigate(self, route: tuple) -> None:
+    def go_back(self) -> None:
+        if back_stack.try_back():          # a page closed one of its own inner screens
+            return
+        route = self._history.back(self.route)
+        logging.getLogger("ui.mouse_nav").debug("go_back from %s -> %s", self.route, route)
+        if route is not None:
+            self.navigate(route, _record=False)
+
+    def go_forward(self) -> None:
+        route = self._history.forward(self.route)
+        logging.getLogger("ui.mouse_nav").debug("go_forward from %s -> %s", self.route, route)
+        if route is not None:
+            self.navigate(route, _record=False)
+
+    def navigate(self, route: tuple, _record: bool = True) -> None:
         self.close_drawer()
         if route == self.route and self._current is not None:
             return
         if route not in self._pages:
             self._pages[route] = self._build_page(route)
         if self._current is not None:
+            if _record:
+                self._history.visit(self.route)   # new page: forward list is cleared
             self._current.pack_forget()
         self._current = self._pages[route]
         self._current.pack(fill="both", expand=True)
@@ -324,7 +347,22 @@ class Shell:
     def _build_sub(self, page: tk.Frame, macro_key: str, sub_key: str) -> None:
         s = find_sub(macro_key, sub_key)
         if s.builder is not None:
-            s.builder(page)
+            try:
+                s.builder(page)
+            except Exception as exc:     # never leave a blank page: show what failed
+                import logging
+                import traceback
+                logging.getLogger(__name__).exception("Could not build %s", s.title)
+                for w in page.winfo_children():
+                    w.destroy()
+                box = tk.Frame(page, bg=PANEL)
+                box.pack(expand=True, padx=40)
+                tk.Label(box, text=f"{s.title} could not load", bg=PANEL, fg=FG,
+                         font=(_UI, 16, "bold")).pack()
+                tk.Label(box, text=f"{type(exc).__name__}: {exc}", bg=PANEL, fg=FG_DIM,
+                         font=FONT_SUB, wraplength=560, justify="center").pack(pady=(6, 0))
+                tk.Label(box, text=traceback.format_exc().strip().splitlines()[-3], bg=PANEL,
+                         fg=FG_DIM, font=FONT_SUB, wraplength=560).pack(pady=(10, 0))
             return
         box = tk.Frame(page, bg=PANEL)
         box.pack(expand=True)

@@ -41,6 +41,8 @@ from core.upload_data import (
     scan_upload_folder,
     UploadedDNU,
 )
+from core.dupe_flags import DupeFlags
+from core.dupes import file_key
 from core.file_db import get_db
 from ui.scroll import register_scroll_canvas
 from ui.theme import (
@@ -307,16 +309,29 @@ def build_uploader(parent: tk.Frame) -> None:
         char_picker.set_known(char_cat[0].tags)
         copy_picker.set_known(copy_cat[0].tags)
 
-        pending = scan_upload_folder(folder, dnu_reg[0])
+        # Files flagged "throw away" in the duplicate review are never offered.
+        skip = None
+        db = get_db()
+        if db is not None:
+            try:
+                flagged = DupeFlags(db.connection).flagged_keys()
+                if flagged:
+                    skip = lambda f: file_key(f) in flagged
+            except Exception as e:                       # never block uploading on this
+                print(f"[uploader] duplicate flags unavailable: {e}")
+        stats: dict = {}
+        pending = scan_upload_folder(folder, dnu_reg[0], skip=skip, stats=stats)
         queue.clear()
         queue.extend(pending)
         queue_index[0] = 0
+        hidden = (f" ({stats['flagged']} hidden: flagged as duplicates)"
+                  if stats.get("flagged") else "")
 
         if not pending:
-            queue_lbl.config(text="Queue empty — nothing pending.", fg=FG_DIM)
+            queue_lbl.config(text=f"Queue empty — nothing pending.{hidden}", fg=FG_DIM)
             _clear_wizard()
         else:
-            queue_lbl.config(text=f"{len(pending)} image(s) pending.", fg=COLOR_OK)
+            queue_lbl.config(text=f"{len(pending)} image(s) pending.{hidden}", fg=COLOR_OK)
             _show_current()
 
     styled_button(load_row, "Load Queue", command=_load_queue,
