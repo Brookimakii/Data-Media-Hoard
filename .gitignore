@@ -10,4 +10,4 @@ AO3/
 .env
 booru_settings.json
 probe_result.json
-booru-manager-update.zip
+*.zip
