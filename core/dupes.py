@@ -617,3 +617,20 @@ def artist_of(path: str | Path, roots: "str | Path | list[str | Path]") -> str:
         if len(parts) > 1:
             return parts[0]
     return ""
+
+
+def site_of(path: str | Path, roots: "str | Path | list[str | Path]") -> str:
+    """Source site = the second folder below a root (root / artist / site / file); '' if none."""
+    if isinstance(roots, (str, Path)):
+        roots = [roots]
+    target = Path(path).resolve()
+    for root in roots:
+        if not root:
+            continue
+        try:
+            parts = target.relative_to(Path(root).resolve()).parts
+        except ValueError:
+            continue
+        if len(parts) > 2:
+            return parts[1]
+    return ""

@@ -60,7 +60,7 @@ _ACTIVE: "DupesPage | None" = None
 _KEYS_BOUND = False
 _KEYS = (("<Left>", "left"), ("<Right>", "right"), ("<Shift-Left>", "shift-left"),
          ("<Shift-Right>", "shift-right"), ("<Prior>", "prev"), ("<Next>", "next"),
-         ("<space>", "space"), ("<Escape>", "escape"), ("<Key-f>", "fit"), ("<Key-1>", "actual"))
+         ("<space>", "space"), ("<KeyRelease-space>", "space-up"), ("<Escape>", "escape"), ("<Key-f>", "fit"), ("<Key-1>", "actual"))
 
 
 def _activate(page: "DupesPage") -> None:
@@ -486,6 +486,10 @@ class DupesPage(tk.Frame):
             lambda a, b: self._lookup.get(tuple(sorted((by_obj[id(a)], by_obj[id(b)])))),
             [self._base, self._scan_root])
         self._show("detail")
+        try:
+            self.focus_set()          # a Folder/search entry keeping focus would swallow Space and arrows
+        except tk.TclError:
+            pass
 
     def _state_of(self, idx: int) -> str:
         g = self._shown[self._gi]
@@ -517,14 +521,15 @@ class DupesPage(tk.Frame):
             if self._view_name != "detail" or not self.winfo_ismapped():
                 return
             if isinstance(self.focus_get(), tk.Entry):
-                return
+                if name != "space-up":
+                    return
         except tk.TclError:
             return
         d = self._detail
         {"left": lambda: d.step("right", -1), "right": lambda: d.step("right", 1),
          "shift-left": lambda: d.step("left", -1), "shift-right": lambda: d.step("left", 1),
-         "prev": lambda: self._goto(-1), "next": lambda: self._goto(1), "space": d.flicker,
-         "escape": self._back, "fit": d.fit, "actual": d.actual}[name]()
+         "prev": lambda: self._goto(-1), "next": lambda: self._goto(1), "space": lambda: d.hold(True),
+         "space-up": lambda: d.hold(False), "escape": self._back, "fit": d.fit, "actual": d.actual}[name]()
 
 
 def build_duplicates(parent: tk.Frame) -> None:

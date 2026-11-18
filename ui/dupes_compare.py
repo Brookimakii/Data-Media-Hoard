@@ -345,7 +345,9 @@ class ComparePanel(tk.Frame):
                      anchor="w").grid(row=r, column=0, columnspan=2, sticky="ew", padx=10,
                                       pady=(8, 0))
             for col, txt in ((0, row.left), (1, row.right)):
-                tk.Label(self._meta, text=txt or " ", bg=ENTRY_BG, fg=color, font=FONT_MONO,
+                red = row.worse == ("left", "right")[col]
+                tk.Label(self._meta, text=txt or " ", bg=ENTRY_BG, fg=COLOR_FAIL if red else color,
+                         font=FONT_MONO,
                          wraplength=140, justify="left", anchor="w"
                          ).grid(row=r + 1, column=col, sticky="ew", padx=(10, 2))
             r += 2
@@ -393,6 +395,27 @@ class ComparePanel(tk.Frame):
     def flicker(self) -> None:
         self._flicker = not self._flicker
         self._load()
+
+    def hold(self, down: bool) -> None:
+        """Space held: the two images trade sides; released: back. Key auto-repeat sends
+        release/press pairs, so the release is applied after a short delay unless a press follows."""
+        job = getattr(self, "_hold_job", None)
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except tk.TclError:
+                pass
+            self._hold_job = None
+        if down:
+            if not self._flicker:
+                self._flicker = True
+                self._load()
+        elif self._flicker:
+            def release() -> None:
+                self._hold_job = None
+                self._flicker = False
+                self._load()
+            self._hold_job = self.after(60, release)
 
     def fit(self) -> None:
         self._fit()

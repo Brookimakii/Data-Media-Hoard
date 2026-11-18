@@ -15,7 +15,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 
-from core.dupes import Entry, artist_of
+from core.dupes import Entry, artist_of, site_of
 
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -48,6 +48,7 @@ class Row:
     left: str
     right: str
     same: bool | None          # True green, False orange, None neutral
+    worse: str = ""            # "left" / "right": the smaller side, shown in red
 
 
 def human_size(n: int) -> str:
@@ -71,17 +72,23 @@ def compare_rows(a: Entry, b: Entry, scan_root: "str | list[str]" = "",
     da, db = _when(a), _when(b)
     art_a = artist_of(a.path, scan_root) if scan_root else ""
     art_b = artist_of(b.path, scan_root) if scan_root else ""
+    site_a = site_of(a.path, scan_root) if scan_root else ""
+    site_b = site_of(b.path, scan_root) if scan_root else ""
     asp = lambda e: f"{e.width / e.height:.2f}" if e.width and e.height else "—"
     res = lambda e: f"{e.width}×{e.height}" if e.width and e.height else "—"
+    def smaller(x: int, y: int) -> str:
+        return "" if x == y else ("left" if x < y else "right")
+    small_px = smaller(a.pixels, b.pixels) if a.width and a.height and b.width and b.height else ""
     rows = [
         Row("Path", ra, rb, False if ra != rb else True),
         Row("Date", da.strftime("%Y-%m-%d %H:%M"), db.strftime("%Y-%m-%d %H:%M"),
             da.date() == db.date()),
-        Row("Size", human_size(a.size), human_size(b.size), a.size == b.size),
-        Row("Resolution", res(a), res(b), (a.width, a.height) == (b.width, b.height)),
+        Row("Size", human_size(a.size), human_size(b.size), a.size == b.size, smaller(a.size, b.size)),
+        Row("Resolution", res(a), res(b), (a.width, a.height) == (b.width, b.height), small_px),
         Row("Artist", art_a or "—", art_b or "—", art_a == art_b),
+        Row("Site", site_a or "—", site_b or "—", site_a == site_b),
         Row("Format", a.fmt.upper() or "—", b.fmt.upper() or "—", a.fmt == b.fmt),
-        Row("Aspect", asp(a), asp(b), asp(a) == asp(b)),
+        Row("Aspect", asp(a), asp(b), asp(a) == asp(b), small_px if asp(a) != asp(b) else ""),
         Row("Bytes", a.sha256[:10], b.sha256[:10], a.sha256 == b.sha256),
     ]
     if a.is_clip or b.is_clip:
