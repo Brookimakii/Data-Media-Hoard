@@ -36,6 +36,7 @@ class CanvasList(tk.Frame):
         self._row_h, self._draw = row_h, draw_row
         self._on_click, self._on_double = on_click, on_double
         self._count = 0
+        self.last_state = 0
         self._drawn: set[int] = set()
         self._width = 0
         self._job = None
@@ -156,6 +157,7 @@ class CanvasList(tk.Frame):
         self.canvas.yview_scroll(-_WHEEL_UNITS if up else _WHEEL_UNITS, "units")
 
     def _clicked(self, e: tk.Event, handler: Callable[[int, int], None]) -> None:
+        self.last_state = int(getattr(e, "state", 0) or 0)     # Shift = 0x1, Control = 0x4
         y = self.canvas.canvasy(e.y)
         i = int(y // self._row_h)
         if 0 <= i < self._count:

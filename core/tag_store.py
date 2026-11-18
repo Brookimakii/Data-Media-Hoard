@@ -18,6 +18,13 @@ Rules checked on every save
   * a tag cannot imply itself or one of its own synonyms
   * implications cannot loop (a => b => a)
 Implications that point to a tag you do not have yet are allowed.
+
+Sync bookkeeping (used by core/tag_sync.py), same idea as the artists:
+    remote_id    id of the tag on the booru server (None = unknown / never pushed)
+    pushed_json  the snapshot that is currently on the server
+    sync_error   last push error (cleared by any local change or a retry)
+A tag's status is derived by comparing the local snapshot with `pushed_json`:
+synced | pending | failed.
 """
 
 from __future__ import annotations
@@ -89,6 +96,15 @@ def changed_fields(before: dict | None, after: dict | None) -> list[str]:
     return [k for k in FIELDS if before.get(k) != after.get(k)]
 
 
+def plan(local: dict, pushed: dict | None) -> str:
+    """What a push has to do: "noop", "push" (create / update) or "delete"."""
+    if local.get("deleted"):
+        return "noop" if (pushed is None or pushed.get("deleted")) else "delete"
+    if pushed is not None and not pushed.get("deleted") and pushed == local:
+        return "noop"
+    return "push"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -133,6 +149,11 @@ class TagStore:
                 CREATE INDEX IF NOT EXISTS ix_tag_history_tag ON tag_history(tag_id);
                 CREATE INDEX IF NOT EXISTS ix_tag_history_state ON tag_history(state);
             """)
+            cols = {r["name"] for r in self._con.execute("PRAGMA table_info(tags)")}
+            for name, kind in (("remote_id", "INTEGER"), ("pushed_json", "TEXT"),
+                               ("sync_error", "TEXT"), ("sync_at", "TEXT")):
+                if name not in cols:
+                    self._con.execute(f"ALTER TABLE tags ADD COLUMN {name} {kind}")
             self._con.commit()
 
     # ── Row <-> snapshot ──────────────────────────────────────────────────────
@@ -143,6 +164,22 @@ class TagStore:
                 "aliases": json.loads(row["aliases"]), "implies": json.loads(row["implies"]),
                 "deleted": row["deleted_at"] is not None}
 
+    @staticmethod
+    def _pushed(row: sqlite3.Row) -> dict | None:
+        return json.loads(row["pushed_json"]) if row["pushed_json"] else None
+
+    @classmethod
+    def _full(cls, row: sqlite3.Row) -> dict[str, Any]:
+        """Snapshot + id + sync status."""
+        snap = cls._snapshot(row)
+        if row["sync_error"]:
+            status = "failed"
+        else:
+            status = "synced" if plan(snap, cls._pushed(row)) == "noop" else "pending"
+        snap.update(id=row["id"], remote_id=row["remote_id"], sync_error=row["sync_error"],
+                    sync_status=status)
+        return snap
+
     def _row(self, tag_id: int) -> sqlite3.Row:
         row = self._con.execute("SELECT * FROM tags WHERE id = ?", (tag_id,)).fetchone()
         if row is None:
@@ -152,8 +189,8 @@ class TagStore:
     def get(self, tag_id: int) -> dict[str, Any]:
         with self._lock:
             row = self._row(tag_id)
-            snap = self._snapshot(row)
-            snap.update(id=row["id"], created_at=row["created_at"], updated_at=row["updated_at"])
+            snap = self._full(row)
+            snap.update(created_at=row["created_at"], updated_at=row["updated_at"])
             return snap
 
     def find(self, name: str) -> dict[str, Any] | None:
@@ -168,11 +205,7 @@ class TagStore:
                 r = self._con.execute(
                     "SELECT * FROM tags WHERE deleted_at IS NULL AND aliases LIKE ?",
                     (f'%"{name}"%',)).fetchone()
-            if r is None:
-                return None
-            s = self._snapshot(r)
-            s.update(id=r["id"])
-            return s
+            return None if r is None else self._full(r)
 
     # ── Queries ───────────────────────────────────────────────────────────────
 
@@ -211,12 +244,7 @@ class TagStore:
             rows = self._con.execute(
                 f"SELECT * FROM tags WHERE {where} ORDER BY {self._order(sort, descending)} "
                 "LIMIT ? OFFSET ?", (*args, limit, offset)).fetchall()
-            out = []
-            for r in rows:
-                s = self._snapshot(r)
-                s.update(id=r["id"])
-                out.append(s)
-            return out
+            return [self._full(r) for r in rows]
 
     def count(self, query: str = "", category: str = "all") -> int:
         where, args = self._where(query, category)
@@ -330,6 +358,7 @@ class TagStore:
 
     def _apply(self, tag_id: int, snap: dict | None) -> None:
         now = _now()
+        self._con.execute("UPDATE tags SET sync_error = NULL WHERE id = ?", (tag_id,))
         try:
             if snap is None or snap.get("deleted"):
                 self._con.execute("UPDATE tags SET deleted_at = COALESCE(deleted_at, ?), "
@@ -422,6 +451,147 @@ class TagStore:
                     self._con.execute("RELEASE item")
                     skipped += 1
         return added, skipped
+
+    def import_remote(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        """Merge tags fetched from the server, as one undoable batch.
+
+        Each item: name, category, wiki, aliases, implies, remote_id.
+          * unknown name              -> added
+          * known, nothing unpushed   -> updated to the server's version
+          * known, local edits waiting -> kept as they are (they will be pushed)
+        Returns {"added", "updated", "same", "kept", "skipped", "errors"}.
+        """
+        batch = uuid.uuid4().hex
+        out: dict[str, Any] = {"added": 0, "updated": 0, "same": 0, "kept": 0,
+                               "skipped": 0, "errors": []}
+        with self._lock, self._con:
+            self._discard_redo()
+            for item in items:
+                try:
+                    self._con.execute("SAVEPOINT remote_item")
+                    kind = self._merge_remote(item, batch)
+                    self._con.execute("RELEASE remote_item")
+                    out[kind] += 1
+                except TagError as e:
+                    self._con.execute("ROLLBACK TO remote_item")
+                    self._con.execute("RELEASE remote_item")
+                    out["skipped"] += 1
+                    out["errors"].append(f"{item.get('name', '?')}: {e}")
+        return out
+
+    def _merge_remote(self, item: dict[str, Any], batch: str) -> str:
+        snap = {**normalize(item), "deleted": False}
+        rid = item.get("remote_id")
+        row = self._con.execute(
+            "SELECT * FROM tags WHERE deleted_at IS NULL AND name = ? COLLATE NOCASE",
+            (snap["name"],)).fetchone()
+        if row is None:
+            tag_id = self._insert(snap, batch, "fetch")
+            self._con.execute("UPDATE tags SET remote_id=?, pushed_json=?, sync_at=? WHERE id=?",
+                              (rid, json.dumps(snap, ensure_ascii=False), _now(), tag_id))
+            return "added"
+        full = self._full(row)
+        before = self._snapshot(row)
+        if full["sync_status"] != "synced":
+            return "kept"
+        if before == snap:
+            self._con.execute("UPDATE tags SET remote_id=?, pushed_json=?, sync_at=? WHERE id=?",
+                              (rid, json.dumps(snap, ensure_ascii=False), _now(), row["id"]))
+            return "same"
+        self._check(snap, row["id"])
+        self._apply(row["id"], snap)
+        self._record(batch, row["id"], "fetch", before, snap)
+        self._con.execute("UPDATE tags SET remote_id=?, pushed_json=?, sync_at=? WHERE id=?",
+                          (rid, json.dumps(snap, ensure_ascii=False), _now(), row["id"]))
+        return "updated"
+
+    # ── Autocomplete ──────────────────────────────────────────────────────────
+
+    def suggest(self, prefix: str, limit: int = 8,
+                exclude: tuple[str, ...] | set[str] = ()) -> list[dict[str, str]]:
+        """Tags to offer while typing: names starting with `prefix` first, then names
+        containing it, then tags that have it as a synonym ("via" says which)."""
+        p = norm_tag(prefix)
+        if not p:
+            return []
+        skip = {norm_tag(x) for x in exclude}
+        found: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add(rows, via_alias: bool) -> None:
+            for r in rows:
+                if len(found) >= limit:
+                    return
+                if r["name"] in seen or r["name"] in skip:
+                    continue
+                seen.add(r["name"])
+                via = ""
+                if via_alias:
+                    via = next((a for a in json.loads(r["aliases"]) if p in a), "")
+                found.append({"name": r["name"], "category": r["category"], "via": via})
+
+        with self._lock:
+            q = "SELECT name, category, aliases FROM tags WHERE deleted_at IS NULL AND "
+            add(self._con.execute(q + "name LIKE ? ESCAPE '\\' ORDER BY name LIMIT 40",
+                                  (_like(p)[1:],)), False)
+            add(self._con.execute(q + "name LIKE ? ESCAPE '\\' ORDER BY name LIMIT 40",
+                                  (_like(p),)), False)
+            add(self._con.execute(q + "aliases LIKE ? ESCAPE '\\' ORDER BY name LIMIT 40",
+                                  (_like(p),)), True)
+        return found
+
+    # ── Sync bookkeeping ──────────────────────────────────────────────────────
+
+    def _status_rows(self):
+        return self._con.execute("SELECT * FROM tags").fetchall()
+
+    def pending_ids(self) -> list[int]:
+        with self._lock:
+            return [r["id"] for r in self._status_rows()
+                    if not r["sync_error"]
+                    and plan(self._snapshot(r), self._pushed(r)) != "noop"]
+
+    def failed_ids(self) -> list[int]:
+        with self._lock:
+            return [r["id"] for r in self._status_rows() if r["sync_error"]]
+
+    def sync_summary(self) -> dict[str, int]:
+        out = {"synced": 0, "pending": 0, "failed": 0}
+        with self._lock:
+            for r in self._status_rows():
+                snap = self._snapshot(r)
+                if snap["deleted"] and r["pushed_json"] is None:
+                    continue
+                if r["sync_error"]:
+                    out["failed"] += 1
+                elif plan(snap, self._pushed(r)) == "noop":
+                    out["synced"] += 1
+                else:
+                    out["pending"] += 1
+        return out
+
+    def sync_view(self, tag_id: int) -> tuple[dict, int | None, dict | None]:
+        """(local snapshot, remote id, snapshot last pushed) for one tag."""
+        with self._lock:
+            row = self._row(tag_id)
+            return self._snapshot(row), row["remote_id"], self._pushed(row)
+
+    def mark_pushed(self, tag_id: int, remote_id: int | None, pushed: dict) -> bool:
+        """Record a successful push. Returns True when the tag changed meanwhile."""
+        with self._lock, self._con:
+            self._con.execute(
+                "UPDATE tags SET remote_id=?, pushed_json=?, sync_error=NULL, sync_at=? "
+                "WHERE id=?", (remote_id, json.dumps(pushed, ensure_ascii=False), _now(), tag_id))
+            row = self._row(tag_id)
+            return plan(self._snapshot(row), self._pushed(row)) != "noop"
+
+    def mark_failed(self, tag_id: int, message: str) -> None:
+        with self._lock, self._con:
+            self._con.execute("UPDATE tags SET sync_error=? WHERE id=?", (message, tag_id))
+
+    def clear_error(self, tag_id: int) -> None:
+        with self._lock, self._con:
+            self._con.execute("UPDATE tags SET sync_error=NULL WHERE id=?", (tag_id,))
 
     # ── History ───────────────────────────────────────────────────────────────
 

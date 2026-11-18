@@ -11,6 +11,10 @@ Tags management, three screens inside one page (same layout as the Artists page)
 
 Tag names in the detail screen are links: click one to jump to that tag.
 All data goes through core.tag_store (local DB, history, undo/redo).
+Every change is pushed to the booru server automatically (core.tag_sync); each tag shows
+its state: ✓ synced · ● pending · ⟳ syncing · ✕ failed (with a Retry button). "⇩ Fetch"
+pulls tags (with synonyms, implications and wiki) from the server. The login lives in the
+⚙ settings. The Implies field of the form completes tag names as you type.
 """
 
 from __future__ import annotations
@@ -22,7 +26,9 @@ from typing import Callable
 
 from core.file_db import get_db
 from core.tag_store import CATEGORIES, SORTS, TagError, TagStore
+from core.tag_sync import TagSync
 from ui import back_stack
+from ui.autocomplete import Autocomplete
 from ui.artists_page import _Button, _caption, _entry, _local_time, _text
 from ui.theme import (
     ACCENT, ACCENT2, BORDER, COLOR_FAIL, COLOR_OK, ENTRY_BG, FG, FG_DIM, FONT_BTN,
@@ -35,10 +41,22 @@ _ROW_GAP = 4
 _HIST_ROWS = 6
 
 # Column layout of the list (fractions of the row width)
-_COL_NAME = (0.00, 0.30)
-_COL_TYPE = (0.30, 0.13)
-_COL_SYN = (0.43, 0.27)
-_COL_IMP = (0.70, 0.30)
+_COL_NAME = (0.00, 0.25)
+_COL_TYPE = (0.25, 0.11)
+_COL_SYN = (0.36, 0.22)
+_COL_IMP = (0.58, 0.23)
+_COL_SYNC = (0.81, 0.19)
+
+_AMBER = "#d9a441"
+_POLL_MS = 400
+
+# status -> (short text, long text, colour)
+_STATUS = {
+    "synced": ("✓ synced", "In sync with the server", COLOR_OK),
+    "pending": ("● pending", "Waiting to be pushed to the server", _AMBER),
+    "syncing": ("⟳ syncing…", "Pushing to the server…", ACCENT),
+    "failed": ("✕ failed", "Push failed", COLOR_FAIL),
+}
 
 # e621-style colours for the tag types
 TYPE_COLOR = {
@@ -55,9 +73,13 @@ def _summary(items: list[str], limit: int = 2) -> str:
 
 
 class TagsPage(tk.Frame):
-    def __init__(self, parent: tk.Misc, store: TagStore) -> None:
+    def __init__(self, parent: tk.Misc, store: TagStore, sync: TagSync | None = None) -> None:
         super().__init__(parent, bg=PANEL)
         self._store = store
+        self._sync = sync
+        self._last_busy: set[int] = set()
+        self._ticks = 0
+        self._cfg_seen: tuple | None = None
         self._selected: int | None = None
         self._page_no = 0
         self._page_size = 10
@@ -92,6 +114,8 @@ class TagsPage(tk.Frame):
         self._refresh_list()
         self._show("list")
         back_stack.register(self.handle_back)
+        self._kick()                       # push whatever was left pending last time
+        self.after(_POLL_MS, self._poll)
 
     # ── Screen switching ──────────────────────────────────────────────────────
 
@@ -144,6 +168,12 @@ class TagsPage(tk.Frame):
                 parts.append(f"Undo: {undo}")
             if redo:
                 parts.append(f"Redo: {redo}")
+            if self._sync is not None:
+                cfg = self._sync.settings()
+                if not cfg.configured:
+                    parts.append("Push is off: set the server login in ⚙ (top right).")
+                elif not cfg.auto_push:
+                    parts.append("Auto-push is off.")
         self._hint.config(text="    ".join(parts))
 
     def _say(self, text: str, error: bool = False) -> None:
@@ -151,6 +181,91 @@ class TagsPage(tk.Frame):
         if self._msg_job is not None:
             self.after_cancel(self._msg_job)
         self._msg_job = self.after(6000, lambda: self._status.config(text=""))
+
+    # ── Sync status, polling, retry, fetch ────────────────────────────────────
+
+    def _status_of(self, tag: dict, busy: set[int]) -> tuple[str, str, str]:
+        key = "syncing" if tag["id"] in busy else tag["sync_status"]
+        return _STATUS.get(key, _STATUS["pending"])
+
+    def _kick(self) -> None:
+        """Push pending tags (when auto-push is on) and refresh the sync widgets."""
+        if self._sync is not None:
+            self._sync.request_pending()
+        self._update_sync_ui()
+
+    def _update_sync_ui(self) -> None:
+        if self._sync is None:
+            return
+        failed = self._store.sync_summary()["failed"]
+        if failed:
+            self._btn_retry_all.config(text=f"⟳  Retry {failed} failed")
+            if not self._btn_retry_all.winfo_ismapped():
+                self._btn_retry_all.pack(side="right", padx=(0, 8))
+        else:
+            self._btn_retry_all.pack_forget()
+
+    def _retry_all(self) -> None:
+        if self._sync is not None and self._sync.retry_failed():
+            self._say("Retrying failed pushes…")
+        self._refresh_list()
+        self._update_sync_ui()
+
+    def _retry_one(self) -> None:
+        if self._sync is not None and self._selected is not None:
+            self._sync.retry(self._selected)
+            self._render_sync_status(self._store.get(self._selected))
+            self._update_sync_ui()
+
+    def _poll(self) -> None:
+        """Repaint what the background worker finished; runs every few hundred ms."""
+        if not self.winfo_exists():
+            return
+        if self._sync is not None:
+            self._ticks += 1
+            done = self._sync.poll()
+            if done:
+                self._refresh_list()
+                if self._view_name == "detail" and self._selected is not None:
+                    self._refresh_detail_status()
+                self._update_sync_ui()
+                bad = [r for r in done if not r.ok]
+                if bad:
+                    self._say(f"Push failed: {bad[-1].message}", error=True)
+            elif self._sync.syncing_ids() != self._last_busy:
+                self._refresh_list()
+            self._last_busy = self._sync.syncing_ids()
+            self._poll_fetch()
+            cfg = self._sync.settings()
+            seen = (cfg.configured, cfg.auto_push)
+            if seen != self._cfg_seen:                 # ⚙ settings were changed
+                self._cfg_seen = seen
+                self._update_hint()
+                self._kick()
+        self.after(_POLL_MS, self._poll)
+
+    def _poll_fetch(self) -> None:
+        for r in self._sync.poll_fetch():
+            self._btn_fetch.set_enabled(True)
+            self._page_no = 0
+            self._refresh_list()
+            self._say(r.message, error=not r.ok)
+        if self._sync.fetching:
+            done, total = self._sync.fetch_progress()
+            self._btn_fetch.set_enabled(False)
+            self._say(f"Fetching tags… {done}/{total}" if total else "Fetching tags…")
+
+    def _fetch(self) -> None:
+        if self._sync is None:
+            return
+        _FetchDialog(self, self._start_fetch, self._q.get().strip())
+
+    def _start_fetch(self, pattern: str, limit: int) -> None:
+        if self._sync.fetch(pattern, limit):
+            self._btn_fetch.set_enabled(False)
+            self._say("Fetching tags…")
+        else:
+            self._poll_fetch()                         # shows "login not set" / "already running"
 
     # ══ LIST screen ═══════════════════════════════════════════════════════════
 
@@ -164,7 +279,10 @@ class TagsPage(tk.Frame):
         tk.Entry(box, textvariable=self._q, width=26, bg=ENTRY_BG, fg=FG, insertbackground=FG,
                  relief="flat", font=(_UI, 10)).pack(side="left", padx=6, pady=6)
 
+        self._btn_retry_all = _Button(bar, "", self._retry_all, "danger")   # shown only when needed
         _Button(bar, "＋  Add tag", self._add, "primary").pack(side="right")
+        self._btn_fetch = _Button(bar, "⇩  Fetch", self._fetch)
+        self._btn_fetch.pack(side="right", padx=(0, 8))
         self._btn_redo = _Button(bar, "↷ Redo", self._redo)
         self._btn_redo.pack(side="right", padx=(0, 8))
         self._btn_undo = _Button(bar, "↶ Undo", self._undo)
@@ -204,11 +322,12 @@ class TagsPage(tk.Frame):
         head = tk.Frame(view, bg=PANEL, height=22)
         head.pack(side="top", fill="x", padx=24)
         for title, (x, w) in (("NAME", _COL_NAME), ("TYPE", _COL_TYPE),
-                              ("SYNONYMS", _COL_SYN), ("IMPLIES", _COL_IMP)):
+                              ("SYNONYMS", _COL_SYN), ("IMPLIES", _COL_IMP),
+                              ("SERVER", _COL_SYNC)):
             tk.Label(head, text=title, bg=PANEL, fg=FG_DIM, font=(_UI, 8, "bold"), anchor="w",
                      padx=14).place(relx=x, rely=0, relwidth=w, relheight=1)
         self._count = tk.Label(head, text="", bg=PANEL, fg=FG_DIM, font=(_UI, 8), anchor="e")
-        self._count.place(relx=0.8, rely=0, relwidth=0.2, relheight=1)
+        self._count.place(relx=0.88, rely=0, relwidth=0.12, relheight=1)
 
         self._rows = tk.Frame(view, bg=PANEL)
         self._rows.pack(side="top", fill="both", expand=True, padx=24)
@@ -241,8 +360,9 @@ class TagsPage(tk.Frame):
                                   self._page_size, self._page_no * self._page_size)
         for w in self._rows.winfo_children():
             w.destroy()
+        busy = self._sync.syncing_ids() if self._sync is not None else set()
         for tag in rows:
-            self._add_row(tag)
+            self._add_row(tag, busy)
         if not rows:
             msg = ("No match." if query.strip() or self._category != "all" else
                    "No tags yet.\nClick “＋ Add tag”.")
@@ -256,7 +376,7 @@ class TagsPage(tk.Frame):
         self._btn_dir.config(text="▼" if self._desc else "▲")
         self._update_hint()
 
-    def _add_row(self, t: dict) -> None:
+    def _add_row(self, t: dict, busy: set[int]) -> None:
         row = tk.Frame(self._rows, bg=ENTRY_BG, height=_ROW_H, cursor="hand2",
                        highlightthickness=1, highlightbackground=BORDER)
         row.pack(fill="x", pady=(0, _ROW_GAP))
@@ -266,6 +386,9 @@ class TagsPage(tk.Frame):
             (_summary(t["aliases"]), _COL_SYN, FG_DIM, (_UI, 10)),
             (_summary(t["implies"]), _COL_IMP, FG_DIM, (_UI, 10)),
         ]
+        if self._sync is not None:
+            st_text, _long, st_color = self._status_of(t, busy)
+            cells.append((st_text, _COL_SYNC, st_color, (_UI, 10, "bold")))
         labels = []
         for text, (x, w), fg, font in cells:
             lbl = tk.Label(row, text=text, bg=ENTRY_BG, fg=fg, font=font, anchor="w", padx=14)
@@ -325,6 +448,7 @@ class TagsPage(tk.Frame):
             self._say(str(e), error=True)
             return
         if ids:
+            self._kick()
             self._refresh_list()
             self._say(f"{verb}: {label}.")
 
@@ -345,7 +469,18 @@ class TagsPage(tk.Frame):
         self._title = tk.Label(body, text="", bg=PANEL, fg=FG, font=(_UI, 18, "bold"), anchor="w")
         self._title.pack(fill="x")
         self._badge = tk.Label(body, text="", bg=PANEL, fg=FG, font=(_UI, 10, "bold"), anchor="w")
-        self._badge.pack(fill="x", pady=(2, 10))
+        self._badge.pack(fill="x", pady=(2, 4))
+        state = tk.Frame(body, bg=PANEL)
+        state.pack(fill="x")
+        self._sync_lbl = tk.Label(state, text="", bg=PANEL, fg=COLOR_OK, font=(_UI, 10, "bold"),
+                                  anchor="w")
+        self._sync_lbl.pack(side="left")
+        self._btn_retry = _Button(state, "⟳  Retry push", self._retry_one)
+        self._sync_err = tk.Label(body, text="", bg=PANEL, fg=COLOR_FAIL, font=FONT_SUB,
+                                  anchor="w", justify="left")
+        self._sync_err.bind("<Configure>",
+                            lambda e: self._sync_err.config(wraplength=max(100, e.width)))
+        self._sync_err.pack(fill="x", pady=(0, 8))
 
         _caption(body, "Synonyms  (other names that mean this tag)").pack(fill="x")
         self._r_alias = self._links_box(body)
@@ -419,7 +554,31 @@ class TagsPage(tk.Frame):
         self._r_wiki.insert("1.0", t["wiki"] or "—")
         self._r_wiki.config(state="disabled")
         self._btn_back.config(text="‹  Back" if self._trail else "‹  Tags")
+        self._render_sync_status(t)
         self._show("detail")
+
+    def _render_sync_status(self, t: dict) -> None:
+        if self._sync is None:
+            self._sync_lbl.config(text="")
+            self._sync_err.config(text="")
+            self._btn_retry.pack_forget()
+            return
+        busy = self._sync.syncing_ids()
+        text, long_text, color = self._status_of(t, busy)
+        remote = f" · on server as #{t['remote_id']}" if t.get("remote_id") else ""
+        self._sync_lbl.config(text=f"{text}  ·  {long_text}{remote}", fg=color)
+        failed = t["sync_status"] == "failed" and t["id"] not in busy
+        self._sync_err.config(text=(t.get("sync_error") or "") if failed else "")
+        if failed:
+            self._btn_retry.pack(side="left", padx=(12, 0))
+        else:
+            self._btn_retry.pack_forget()
+
+    def _refresh_detail_status(self) -> None:
+        try:
+            self._render_sync_status(self._store.get(self._selected))
+        except TagError:
+            pass
 
     def _follow(self, tag_id: int) -> None:
         if self._selected is not None:
@@ -454,7 +613,10 @@ class TagsPage(tk.Frame):
                  f"{'…' if len(by) > 5 else ''}.") if by else ""
         if not messagebox.askyesno(
                 "Delete tag",
-                f"Delete '{t['name']}'?{extra}\n\nIt stays in the history and Undo brings it back.",
+                f"Delete '{t['name']}'?{extra}\n\nIt stays in the history and Undo brings it back."
+                + ("\n\nOn the server its synonyms and implications are removed; the tag "
+                   "itself and its wiki stay (the API cannot delete them)."
+                   if self._sync is not None and t.get("remote_id") is not None else ""),
                 parent=self):
             return
         try:
@@ -463,6 +625,7 @@ class TagsPage(tk.Frame):
             self._say(str(e), error=True)
             return
         self._selected = None
+        self._kick()
         self._go_list()
         self._say(f"Deleted '{t['name']}'.")
 
@@ -471,6 +634,7 @@ class TagsPage(tk.Frame):
             _HistoryDialog(self, self._store, self._selected, self._after_restore)
 
     def _after_restore(self, tag_id: int) -> None:
+        self._kick()
         self._open_detail(tag_id)
         self._say("Version restored.")
 
@@ -502,8 +666,11 @@ class TagsPage(tk.Frame):
         right = tk.Frame(row, bg=PANEL)
         right.pack(side="left", padx=(12, 0))
         _caption(right, "Type").pack(fill="x")
-        ttk.Combobox(right, textvariable=self._v_type, values=list(CATEGORIES),
-                     state="readonly", width=12).pack(ipady=3)
+        type_menu = tk.OptionMenu(right, self._v_type, *CATEGORIES)
+        type_menu.config(bg=ENTRY_BG, fg=FG, activebackground=ACCENT, activeforeground=FG,
+                         highlightthickness=1, highlightbackground=BORDER, relief="flat",
+                         font=(_UI, 10), width=11, anchor="w")
+        type_menu.pack(pady=(0, 0))
 
         _caption(body, "Synonyms (comma separated)").pack(fill="x")
         self._e_alias = _entry(body, self._v_alias)
@@ -523,11 +690,22 @@ class TagsPage(tk.Frame):
         bar.pack(side="right", fill="y")          # the one allowed scrollbar
         self._t_wiki.pack(side="left", fill="both", expand=True)
 
+        # created before the Escape binding below so that Esc closes the list first
+        self._complete = Autocomplete(self._e_implies, self._suggest, TYPE_COLOR,
+                                      on_change=self._check_dirty)
+
         for seq in ("<KeyRelease>", "<<Paste>>", "<<Cut>>", "<<Undo>>", "<<Redo>>"):
             self._t_wiki.bind(seq, lambda _e: self.after_idle(self._check_dirty), add="+")
         for w in (self._e_name, self._e_alias, self._e_implies, self._t_wiki):
-            w.bind("<Control-s>", lambda _e: (self._save(), "break")[1])
-            w.bind("<Escape>", lambda _e: (self._cancel(), "break")[1])
+            w.bind("<Control-s>", lambda _e: (self._save(), "break")[1], add="+")
+            w.bind("<Escape>", lambda _e: (self._cancel(), "break")[1], add="+")
+
+    def _suggest(self, prefix: str, others: list[str]) -> list[dict]:
+        """Tags to offer in the Implies field: not itself, not already listed."""
+        skip = [*others, self._v_name.get()]
+        if self._selected is not None:                  # nor one of its own synonyms
+            skip += self._store.get(self._selected)["aliases"]
+        return self._store.suggest(prefix, 8, skip)
 
     def _raw(self) -> tuple:
         return (self._v_name.get(), self._v_type.get(), self._v_alias.get(),
@@ -569,6 +747,7 @@ class TagsPage(tk.Frame):
             return False
         self._dirty = False
         self._trail.clear()
+        self._kick()
         self._open_detail(tag_id)
         self._say(note)
         return True
@@ -582,6 +761,59 @@ class TagsPage(tk.Frame):
             self._open_detail(self._selected)
         else:
             self._go_list()
+
+
+# ── Fetch dialog ──────────────────────────────────────────────────────────────
+
+class _FetchDialog(tk.Toplevel):
+    """Ask which tags to fetch: a name pattern (* = wildcard) and how many."""
+
+    def __init__(self, page: TagsPage, on_fetch: Callable[[str, int], None],
+                 initial: str = "") -> None:
+        super().__init__(page)
+        self._on_fetch = on_fetch
+        self.title("Fetch tags from the server")
+        self.configure(bg=PANEL)
+        self.transient(page.winfo_toplevel())
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+        tk.Label(self, text="Fetch tags from the server", bg=PANEL, fg=FG,
+                 font=(_UI, 14, "bold"), anchor="w").pack(fill="x", padx=20, pady=(16, 2))
+        tk.Label(self, text="Brings their type, synonyms, implications and wiki. Tags you have\n"
+                            "edited but not pushed yet are left alone. One Undo reverts a fetch.",
+                 bg=PANEL, fg=FG_DIM, font=FONT_SUB, anchor="w", justify="left"
+                 ).pack(fill="x", padx=20, pady=(0, 10))
+
+        self._v_pattern = tk.StringVar(value=(initial + "*") if initial else "*")
+        self._v_limit = tk.StringVar(value="50")
+        _caption(self, "Name pattern  (e.g.  canine*   *_ears   *  for the most used tags)"
+                 ).pack(fill="x", padx=20)
+        e = _entry(self, self._v_pattern)
+        e.pack(fill="x", padx=20, pady=(0, 8), ipady=4)
+        _caption(self, "How many tags (most used first, at most 320)").pack(fill="x", padx=20)
+        _entry(self, self._v_limit).pack(fill="x", padx=20, pady=(0, 12), ipady=4)
+
+        foot = tk.Frame(self, bg=PANEL)
+        foot.pack(fill="x", padx=20, pady=(0, 16))
+        _Button(foot, "⇩  Fetch", self._go, "primary").pack(side="left")
+        _Button(foot, "Cancel", self.destroy).pack(side="left", padx=(8, 0))
+        e.bind("<Return>", lambda _e: self._go())
+        e.focus_set()
+
+        self.update_idletasks()
+        top = page.winfo_toplevel()
+        x = top.winfo_rootx() + (top.winfo_width() - self.winfo_width()) // 2
+        y = top.winfo_rooty() + (top.winfo_height() - self.winfo_height()) // 3
+        self.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+    def _go(self) -> None:
+        try:
+            limit = max(1, min(320, int(self._v_limit.get().strip() or "50")))
+        except ValueError:
+            limit = 50
+        pattern = self._v_pattern.get().strip() or "*"
+        self.destroy()
+        self._on_fetch(pattern, limit)
 
 
 # ── History dialog ────────────────────────────────────────────────────────────
@@ -688,4 +920,8 @@ def build_tags(parent: tk.Frame) -> None:
         tk.Label(parent, text="Database not initialised.", bg=PANEL, fg=COLOR_FAIL,
                  font=(_UI, 12)).pack(expand=True)
         return
-    TagsPage(parent, TagStore(db.connection)).pack(fill="both", expand=True)
+    store = TagStore(db.connection)
+    sync = TagSync(store)
+    sync.start()
+    TagsPage(parent, store, sync).pack(fill="both", expand=True)
+
